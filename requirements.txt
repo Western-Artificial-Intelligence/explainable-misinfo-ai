@@ -1,0 +1,9 @@
+pandas
+numpy
+transformers
+datasets
+evaluate
+scikit-learn
+torch
+kagglehub
+streamlit
