@@ -1,0 +1,39 @@
+# Preprocess Report
+
+## liar_test_3class.csv
+- **Input**: `..\data\raw\liar_test_3class.csv`
+- **Output**: `..\data\processed\liar_test_3class_clean.csv`
+- **Rows (output)**: 1,267
+- **Label distribution (%):**
+  - true: 35.44%
+  - mixed: 37.65%
+  - false: 26.91%
+- **Avg text length (tokens)**: 18.33
+
+## liar_train_3class.csv
+- **Input**: `..\data\raw\liar_train_3class.csv`
+- **Output**: `..\data\processed\liar_train_3class_clean.csv`
+- **Rows (output)**: 10,220
+- **Label distribution (%):**
+  - true: 35.57%
+  - mixed: 36.81%
+  - false: 27.62%
+- **Avg text length (tokens)**: 17.96
+
+## liar_val_3class.csv
+- **Input**: `..\data\raw\liar_val_3class.csv`
+- **Output**: `..\data\processed\liar_val_3class_clean.csv`
+- **Rows (output)**: 1,283
+- **Label distribution (%):**
+  - true: 32.74%
+  - mixed: 37.8%
+  - false: 29.46%
+- **Avg text length (tokens)**: 17.88
+
+## Combined Summary
+- **Total rows (output)**: 12,770
+- **Label distribution (%):**
+  - true: 35.27%
+  - mixed: 36.99%
+  - false: 27.74%
+- **Avg text length (tokens)**: 17.99
