@@ -1,3 +1,5 @@
+move to this directory then execute below
+
 python .\preprocess.py `
   --input `
   ../data/raw/liar_test_3class.csv `
