@@ -1,0 +1,6 @@
+python .\preprocess.py `
+  --input `
+  ../data/raw/liar_test_3class.csv `
+  ../data/raw/liar_train_3class.csv `
+  ../data/raw/liar_val_3class.csv `
+  --output ../data/processed
