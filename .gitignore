@@ -11,3 +11,6 @@ __pycache__/
 data/raw/
 models/
 outputs/
+.venv/
+__pycache__/
+*.pyc
