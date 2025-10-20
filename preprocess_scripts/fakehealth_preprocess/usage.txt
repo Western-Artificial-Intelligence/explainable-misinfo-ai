@@ -1,0 +1,1 @@
+python fakehealth_scrap.py --fakehealth-dir ../../data/raw/fakehealth/dataset --out-dir data/fakehealth
