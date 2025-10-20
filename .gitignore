@@ -8,7 +8,6 @@ __pycache__/
 *.ckpt
 *.onnx
 *.log
-data/raw/
 models/
 outputs/
 .venv/
