@@ -1,0 +1,6 @@
+Folder: data\09-01-2020
+label distribution (%):
+label
+Real    96.09%
+Fake     3.91%
+Avg text length: 33.66

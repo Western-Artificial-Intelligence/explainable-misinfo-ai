@@ -1,0 +1,6 @@
+Folder: ./data/fakehealth\HealthStory
+label distribution (%):
+label
+real    71.72%
+fake    28.28%
+Avg text length: 631.07
