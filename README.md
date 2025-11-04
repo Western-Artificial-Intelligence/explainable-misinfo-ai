@@ -1,5 +1,15 @@
 # explainable-misinfo-ai
 
+cd explainable-misinfo-ai 
+source .venv/bin/activate  
+git status
+git log --oneline -5
+
+Open Command Palette → Cmd + Shift + P 
+Search: Python: Select Interpreter
+Choose the one that points to your venv
+
+
 # TruthLens — Misinfo Classifier + Debunker (MVP)
 
 Shining a light on misinformation — with explainable AI.
@@ -105,4 +115,67 @@ data/*
 (If UI)
 
 ## Risks / Rollback
+```
+##Fast API Framework
+api/
+├── main.py # Core FastAPI app
+├── routes/
+│ ├── classify.py # /classify endpoint
+│ └── health.py # /healthz endpoint
+├── utils/
+│ └── cache.py # In-memory caching logic
+└── init.py
 
+- `main.py` → Launches the API and connects routes  
+- `routes/classify.py` → Handles incoming classification requests  
+- `utils/cache.py` → Stores previously computed results to save time  
+
+/healthz (GET)
+Returns a simple message: "TruthLens backend is healthy!"
+Useful for monitoring if the API is running
+
+/classify (POST)
+Input: JSON with a text field
+Output: JSON with:
+label: factual | mixed | false
+confidence: float between 0 and 1
+
+e.g.
+POST /classify
+{
+    "text": "Is AI dangerous?"
+}
+
+Response:
+{
+    "label": "factual",
+    "confidence": 0.9,
+    "explanation": "Dummy placeholder explanation"
+}
+
+explanation: short text explaining the decision
+## How Caching Works
+A user asks a question (`"Is AI dangerous?"`).
+2. The computer first checks a **database** (cache) to see if they've answered it before.  
+   - ✅ If found → quickly gives the answer from the database.  
+   - ❌ If not → looks it up (runs the model), writes the answer in the database, then gives it to the user.
+
+##How to Start 
+source .venv/bin/activate
+uvicorn api.main:app --reload
+
+### To Test /classify endpoint 
+Type into new terminal
+curl -X POST "http://127.0.0.1:8000/classify" \
+     -H "Content-Type: application/json" \
+     -d '{"text":"Is AI dangerous?"}'
+
+Expected output (dummy):
+{
+  "label": "factual",
+  "confidence": 0.92,
+  "explanation": "This is a placeholder explanation for 'factual' classification."
+}
+
+##To Preview Markdown
+Ctrl+Shift+V
