@@ -100,6 +100,37 @@ Binary label per file structure:
 ## License/Terms
 CoAID dataset is provided for research use. Check the GitHub repository README for specific terms and citation requirements.
 
+## Unified Schema 
+
+### Claim/News Data
+| Column           | Type | Notes                                     |
+|------------------|------|-------------------------------------------|
+| fact_check_url   | str  | Fact-check/verification source URL        |
+| news_url         | str  | Original claim/news source URL            |
+| claim_text       | str  | Claim title or headline                   |
+| label            | str  | Label (True/False)                        |
+| dataset          | str  | Name of Dataset it comes from             |
+| split            | str  | train/valid/test                          |
+| label_confidence | str  | Gold/Weak                                 |
+| article_text     | str  | claim/news source article text            |
+| content_status   | str  | title_only/partial/full_article           |
+| archive_url      | str  | archive URL                               |
+| is_archived      | bool | Archived indicator                        |
+| source_domain    | str  | source domain from url                    |
+| is_hydrated      | bool | hydration indicator                       |
+| fetch_status     | str  | Status of article scraping succession     |
+| lang             | str  | language of article                       |
+| content_char_len | int  | number of chars in article                |
+| claim_norm_hash  | str  | normalized SHA-1 hash of that title       |
+| ingested_at      | str  | time ingested                             |
+| fetch_attempts   | int  | total number of attempts to fetch article |
+| last_fetch_at    | str  | last fetched time                         |
+
+## Notes/Quirks
+- **File-Format**:Parquet file format
+- **Label Confidence**: Drawn from file names. All are gold.
+- **Split**: All are train, placeholder, need to split.
+
 ## Reproduction Steps
 
 ### PowerShell (Windows)
