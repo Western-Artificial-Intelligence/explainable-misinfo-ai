@@ -66,6 +66,36 @@ Tab-separated format. **Note:** Files do NOT include header row. Column order (l
 ## License/Terms
 The LIAR dataset is provided for research use. Citation of Wang (2017) is required. See original repository for detailed terms.
 
+## Unified Schema (Key Files)
+
+### unified_liar_train.tsv / unified_liar_valid.tsv / unified_liar_test.tsv
+
+Parquet file-format. Column order (left to right) is as follows:
+
+| Position | Column           | Type | Notes                                                          |
+|----------|------------------|------|----------------------------------------------------------------|
+| 1        | claim_id         | str | Unique identifier (JSON filename, e.g., "2635.json")           |
+| 2        | label            | str | Truthfulness label (6-class)                                   |
+| 3        | claim_text       | str | The factual claim being checked                                |
+| 4        | subject          | str | Topic categories (comma-separated, e.g., "abortion")           |
+| 5        | context          | str | Reference/context (URL, article excerpt, or event description) |
+| 6        | dataset          | str | Original Dataset name                                          |
+| 7        | split            | str | train/valid/test                                               |
+| 8        | raw_label        | str | Original Label                                                 |
+| 9        | content_status   | str | title_only, partial, full_article                              |
+| 10       | label_confidence | str | Gold/Weak based on count of total count of votes               |
+
+## Notes/Quirks
+- **Label Confidence**: Based on the total number of votes across all categories of labels, if <10 then weak, else gold.
+- **Parquet Format**: Files use `.parquet`
+- **Label Mapping** :
+  - `true` —  `true`
+  - `mostly-true` — `mixed`
+  - `half-true` — `mixed`
+  - `barely-true` — `mixed`
+  - `false` — `false`
+  - `pants-fire` — `false`
+
 ## Reproduction Steps
 
 ### PowerShell (Windows)
