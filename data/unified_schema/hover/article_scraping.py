@@ -1,67 +1,41 @@
-"""
-Article Scraping Utilities for HoVer
-
-Provides threaded hydration for claim text. For HoVer, we mainly hydrate
-short claims using Wikipedia links in supporting_facts if needed.
-"""
-
-import pandas as pd
-from tqdm import tqdm
+import json
 import threading
-from queue import Queue
-import time
+from concurrent.futures import ThreadPoolExecutor
 
-def fetch_claim_text(row):
+# ---------------------------------------------------------------------
+# For HoVer, no real hydration is required because claims already
+# contain full text. These functions remain as placeholders for future
+# datasets requiring scraping.
+# ---------------------------------------------------------------------
+
+def hydrate_claim(row, text_col='claim_text'):
     """
-    Dummy hydration function for HoVer claims.
-    Returns the claim text itself, but can be extended to fetch supporting Wikipedia content.
+    Placeholder hydration function.
+    For HoVer, return the claim_text unchanged.
     """
-    # For HoVer, the main content is already in 'claim_text'.
-    # Optionally, could fetch paragraphs from supporting_facts.
-    return row['claim_text']
+    return row[text_col]
 
-def worker(q, res_list, text_col):
-    while True:
-        row = q.get()
-        if row is None:
-            break
-        hydrated_text = fetch_claim_text(row)
-        res_list.append({
-            'uid': row['uid'],
-            'claim_text': hydrated_text
-        })
-        q.task_done()
 
-def threaded_hydrate(df, text_col='claim_text', num_threads=4):
+def threaded_hydrate(df, text_col='claim_text', max_workers=8):
     """
-    Hydrate claims in a DataFrame using threads.
-
-    Args:
-        df: pandas DataFrame containing claims
-        text_col: column containing the claim text
-        num_threads: number of threads to use
-
-    Returns:
-        pandas DataFrame with hydrated claim_text
+    Threaded hydration for datasets that require external article fetching.
+    HoVer does not require hydration. This simply returns claim_texts.
     """
-    q = Queue()
-    res_list = []
+    results = []
 
-    threads = []
-    for _ in range(num_threads):
-        t = threading.Thread(target=worker, args=(q, res_list, text_col))
-        t.start()
-        threads.append(t)
+    def process_row(idx, row):
+        text = hydrate_claim(row, text_col=text_col)
+        results.append((idx, text))
 
-    for _, row in df.iterrows():
-        q.put(row)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for idx, row in df.iterrows():
+            executor.submit(process_row, idx, row)
 
-    # Stop workers
-    for _ in threads:
-        q.put(None)
+    # Restore order
+    results.sort(key=lambda x: x[0])
 
-    q.join()
-    for t in threads:
-        t.join()
+    hydrated = []
+    for idx, text in results:
+        hydrated.append({"claim_text": text})
 
-    return pd.DataFrame(res_list)
+    return hydrated
