@@ -1,4 +1,4 @@
-# Dataset: FakeHealth
+<!-- # Dataset: FakeHealth
 
 ## Source
 - **URL**: https://github.com/EnyanDai/FakeHealth
@@ -184,4 +184,259 @@ unzip -d data/raw/fakehealth data/raw/fakehealth/original/FakeHealth_repo_snapsh
 {
   "news_reviews_00000": {"tweets": [1075103588148334592, 1075507329322418181]}
 }
+``` -->
+
+# Dataset: FakeHealth (Unified Schema)
+
+## Source
+- **URL**: https://github.com/EnyanDai/FakeHealth
+- **Clone Date**: 2025-10-18
+- **SHA256**: `9ebe53431811b0ba7c0bff7643be739699b64581b2e5e43e0a45e8725109b62c`
+- **Archive Location**: `data/raw/fakehealth/original/FakeHealth_repo_snapshot.zip`
+
+## Citation
+Dai, E., Zhao, Y., Zhu, H., Tian, Z., Tan, Z., & Huang, L. (2022). "Towards Fake News Detection: A Content, Social, and Political View." In *Proceedings of the 15th ACM International Conference on Web Search and Data Mining* (WSDM '22), pp. 144–154. Extended work: Dai, E., & Wang, S. (2021). "Ginger Cannot Cure Cancer: Analyzing Health Claims in News." arXiv preprint arXiv:2104.05808. [GitHub Repository](https://github.com/EnyanDai/FakeHealth)
+
+## Dataset Overview
+
+**Total articles: 2,306**
+- HealthRelease: 606 health news releases
+- HealthStory: 1,700 health stories
+
+**Key Features:**
+- Expert reviews from HealthNewsReview.org
+- 10-point quality evaluation criteria
+- Full article text available (mean 4,133 chars)
+- Health-specific misinformation focus
+
+## Unified Schema Fields
+
+### Core Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | str | Article identifier (e.g., "news_reviews_00000") |
+| `dataset` | str | "fakehealth" |
+| `split` | str | "train" / "val" / "test" |
+| `claim_text` | str | Article headline/title |
+| `article_text` | str | Full article body text |
+| `label` | str | "true" / "false" / "mixed" (derived from expert reviews) |
+| `label_confidence` | str | "gold" (expert-reviewed) |
+
+### Content Metadata
+| Field | Type | Description |
+|-------|------|-------------|
+| `content_status` | str | "full_article" / "partial" / "title_only" |
+| `content_char_len` | int | Character count of article text |
+| `content_type` | str | "HealthRelease" / "HealthStory" |
+| `is_hydrated` | bool | Whether article text was fetched |
+| `lang` | str | Detected language code |
+
+### URL & Source
+| Field | Type | Description |
+|-------|------|-------------|
+| `news_url` | str | Original article URL |
+| `source_domain` | str | Domain extracted from URL |
+| `archive_url` | str | Wayback Machine URL (if used) |
+| `is_archived` | bool | Whether content from archive |
+
+### Fetch Metadata
+| Field | Type | Description |
+|-------|------|-------------|
+| `fetch_status` | str | "success" / "existing_text" / "http_404" / etc. |
+| `fetch_attempts` | int | Number of fetch attempts |
+| `last_fetch_at` | str | ISO timestamp of last fetch |
+| `ingested_at` | str | ISO timestamp of ingestion |
+| `claim_norm_hash` | str | SHA1 hash of normalized title |
+
+### Expert Review Fields (FakeHealth-specific)
+| Field | Type | Description |
+|-------|------|-------------|
+| `expert_rating` | int | Overall quality rating (1-5) |
+| `expert_reviewers` | list | Expert reviewer names |
+| `expert_unsatisfactory_count` | int | Count of "Not Satisfactory" criteria |
+| `expert_criteria` | list | Full 10-point evaluation |
+| `expert_summary` | dict | Expert review summary |
+| `expert_category` | str | Content category |
+| `expert_tags` | list | Topic tags |
+| `expert_news_source` | str | Original news source |
+
+## Label Derivation Strategy
+
+FakeHealth does **not** have explicit binary labels. Labels are derived from expert reviews using a combined approach:
+
+### Method: Rating + Criteria Count
+
+```python
+if (rating <= 2 OR unsatisfactory_count >= 7):
+    label = 'false'  # Poor quality
+elif (rating >= 4 AND unsatisfactory_count <= 3):
+    label = 'true'   # Good quality
+else:
+    label = 'mixed'  # Ambiguous
 ```
+
+**Thresholds:**
+- **Rating scale**: 1-5 (lower = worse quality)
+- **Unsatisfactory count**: 0-10 (from 10 evaluation criteria)
+
+## Label Distribution (Expected)
+
+Based on expert review patterns:
+- **False** (~25-35%): Poor quality, misleading health claims
+- **True** (~30-40%): High-quality, accurate health reporting
+- **Mixed** (~30-40%): Ambiguous quality, partial issues
+- **Unlabeled** (~5-10%): No expert review available
+
+## File Structure
+
+### Raw Data
+```
+data/raw/fakehealth/
+├── dataset/
+│   ├── content/
+│   │   ├── HealthRelease/
+│   │   │   └── news_reviews_*.json (606 files)
+│   │   └── HealthStory/
+│   │       └── story_reviews_*.json (1,700 files)
+│   ├── reviews/
+│   │   ├── HealthRelease.json
+│   │   └── HealthStory.json
+│   └── engagements/
+│       ├── HealthRelease.json
+│       └── HealthStory.json
+└── original/
+    └── FakeHealth_repo_snapshot.zip
+```
+
+### Processed Data
+```
+data/processed/fakehealth/
+├── unified_fakehealth.parquet          # Full dataset
+├── unified_fakehealth_sample.csv       # Sample (100 rows)
+├── label_statistics.txt                # Label distribution stats
+└── batches/
+    └── hydrated_batch_*.parquet        # Intermediate batches
+```
+
+## Usage Example
+
+```python
+import pandas as pd
+
+# Load unified FakeHealth data
+df = pd.read_parquet('data/processed/fakehealth/unified_fakehealth.parquet')
+
+# Basic statistics
+print(f"Total articles: {len(df)}")
+print(f"\nLabel distribution:")
+print(df['label'].value_counts(normalize=True))
+
+# Filter by label
+true_articles = df[df['label'] == 'true']
+false_articles = df[df['label'] == 'false']
+mixed_articles = df[df['label'] == 'mixed']
+
+# Filter by content type
+health_releases = df[df['content_type'] == 'HealthRelease']
+health_stories = df[df['content_type'] == 'HealthStory']
+
+# Access expert reviews
+high_quality = df[df['expert_rating'] >= 4]
+low_quality = df[df['expert_rating'] <= 2]
+
+# Filter by content status
+full_articles = df[df['content_status'] == 'full_article']
+print(f"Full articles: {len(full_articles)} ({len(full_articles)/len(df):.1%})")
+```
+
+## Processing Notes
+
+### Text Availability
+- **Most articles have full text** (mean 4,133 chars)
+- Only hydrates when text is missing or <200 chars
+- Many URLs already from web.archive.org
+
+### Label Quality
+- Labels derived from expert reviews (high quality)
+- Three-way classification: true/false/mixed
+- `label_confidence` = "gold" for all (expert-reviewed)
+- Some articles may not have reviews (unlabeled)
+
+### Review Coverage
+- HealthRelease: 606/606 articles have reviews (100%)
+- HealthStory: Partial coverage (<1,700)
+- Articles without reviews kept with `label = None`
+
+## Data Quality
+
+### Challenges
+- No simple binary labels (requires derivation)
+- Incomplete review coverage (especially HealthStory)
+- Three-way classification complexity
+- Label distribution depends on derivation thresholds
+- Medical terminology may need domain knowledge
+
+### Recommendations
+1. **Binary classification**: Combine "mixed" with "false" or exclude
+2. **Multi-class**: Keep true/false/mixed as three classes
+3. **Threshold tuning**: Adjust rating/criteria thresholds for label derivation
+4. **Expert criteria**: Use 10-point evaluation for explainability
+5. **Domain adaptation**: Fine-tune models on health terminology
+
+## Reproduction Steps
+
+### Clone and Archive
+```bash
+git clone https://github.com/EnyanDai/FakeHealth.git temp_fakehealth
+mkdir -p data/raw/fakehealth/original
+zip -r data/raw/fakehealth/original/FakeHealth_repo_snapshot.zip temp_fakehealth
+sha256sum data/raw/fakehealth/original/FakeHealth_repo_snapshot.zip > data/raw/fakehealth/original/FakeHealth_SHA256.txt
+rm -rf temp_fakehealth
+unzip -d data/raw/fakehealth data/raw/fakehealth/original/FakeHealth_repo_snapshot.zip
+```
+
+### Process to Unified Schema
+```bash
+cd data/unified_schema/fakehealth
+
+# Test with 10 articles
+python fakehealth_unified.py --max-articles 10
+
+# Test with 100 articles
+python fakehealth_unified.py --test
+
+# Process all 2,306 articles
+python fakehealth_unified.py
+```
+
+## Example Output Row
+
+```python
+{
+    'id': 'news_reviews_00000',
+    'dataset': 'fakehealth',
+    'split': 'train',
+    'claim_text': 'Scientists report CRISPR restores effectiveness of lung cancer treatment',
+    'article_text': 'Wilmington, DE, December 17, 2018 - The CRISPR-Cas9 gene editing system...',
+    'label': 'false',
+    'label_confidence': 'gold',
+    'news_url': 'https://web.archive.org/web/...',
+    'content_status': 'full_article',
+    'content_type': 'HealthRelease',
+    'content_char_len': 3245,
+    'is_hydrated': True,
+    'source_domain': 'web.archive.org',
+    'expert_rating': 2,
+    'expert_unsatisfactory_count': 8,
+    'expert_reviewers': ['Andrew Holtz, MPH', 'Yoni Freedhoff, MD'],
+    ...
+}
+```
+
+## License/Terms
+Research use only. Health news reviews from HealthNewsReview.org used under their terms. Check GitHub README for specific terms and ethical considerations for health misinformation data.
+
+## Related Datasets
+- **COAID**: COVID-19 misinformation with claims and news articles
+- **FakeNewsNet**: Political and entertainment fake news
+- **LIAR**: Short political statements with fact-check labels
