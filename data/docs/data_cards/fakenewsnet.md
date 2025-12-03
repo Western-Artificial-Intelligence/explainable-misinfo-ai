@@ -198,7 +198,7 @@ politifact14984	http://www.nfib-sbet.org/	National Federation of Independent Bus
 ## Source
 - **URL**: https://github.com/KaiDMML/FakeNewsNet
 - **Clone Date**: [Your clone date]
-- **SHA256**: [To be calculated]
+- **SHA256**: `622c7162d8af12302528d7d80357763c8d1eb984f85c59ff1a61a0319d465577`
 - **Archive Location**: `data/raw/fakenewsnet/original/FakeNewsNet_repo_snapshot.zip`
 
 ## Citation
