@@ -253,7 +253,7 @@ unzip -d data/raw/hover data/raw/hover/original/HoVer\_repo\_snapshot.zip
 ## Source
 - **URL**: https://github.com/hover-nlp/hover
 - **Clone Date**: [Your clone date]
-- **SHA256**: [To be calculated]
+- **SHA256**: `75e0f51f2429079c52738fee58397d493697445ef28d125036122e378d15db0d`
 - **Archive Location**: `data/raw/hover/original/HoVer_repo_snapshot.zip`
 
 ## Citation
