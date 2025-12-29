@@ -39,8 +39,8 @@ Claim (text) ───▶│ 0) Preprocess / Normalize    │
                          │yes        │no/weak
                          ▼           ▼
           ┌──────────────────────┐   ┌──────────────────────────┐
-          │ 4) Generator LLM      │   │ Output: INSUFFICIENT_     │
-          │ (one model, 2 modes)  │   │ EVIDENCE + show snippets  │
+          │ 4) Generator LLM     │   │ Output: INSUFFICIENT_    │
+          │ (one model, 2 modes) │   │ EVIDENCE + show snippets │
           └──────────┬───────────┘   └──────────────────────────┘
                      │
         ┌────────────┴─────────────┐
