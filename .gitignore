@@ -11,3 +11,5 @@ outputs/
 __pycache__/
 *.pyc
 *.jsonl
+LLM_thinking_space/verifier_pipeline/.cache/
+node_modules/

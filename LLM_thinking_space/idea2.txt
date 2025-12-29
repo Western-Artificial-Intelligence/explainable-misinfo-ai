@@ -1,0 +1,47 @@
+aight. let's label fucking datasets.
+- fakehealth (https://github.com/EnyanDai/FakeHealth)
+- fakenewsnet (https://huggingface.co/datasets/rickstello/FakeNewsNet)
+- coaid (https://huggingface.co/datasets/ComplexDataLab/Misinfo_Datasets)
+- hover (https://huggingface.co/datasets/Dzeniks/hover)
+- liar (https://huggingface.co/datasets/ucsbnlp/liar)
+- fever (https://huggingface.co/datasets/fever/fever)
+- scifact (https://huggingface.co/datasets/allenai/scifact)
+
+fever & scifact for the sake of.... reducing insufficient Evidence
+
+What “ChatGPT-style search” looks like (architecture)
+Query planner
+Takes the user claim
+Generates 1–3 search queries (plus optional follow-up queries)
+Search provider (approved API, not SERP scraping)
+Pick one:
+OpenAI Web Search tool (closest to “ChatGPT Search” behavior) 
+OpenAI Platform
++1
+Google Programmable Search (Custom Search JSON API) 
+Google for Developers
++1
+Brave Search API 
+Brave
++1
+If you were thinking Bing Web Search API: note it was retired Aug 11, 2025; Microsoft pushes “Grounding with Bing Search” via Azure AI Agents instead. 
+Microsoft Learn
++1
+(Also: OpenAI says Enterprise/Edu uses Bing as its third-party provider.) 
+OpenAI Help Center
+Page fetch + clean extraction
+Download the top N URLs (e.g., 10–20)
+Extract main text (boilerplate removal), keep title/date
+Chunk into passages (200–400 tokens)
+Retriever + reranker
+Embed chunks into a vector store
+Retrieve top-k chunks for the claim
+Rerank to top 3–6 best evidence passages
+Verifier + Generator
+Verifier (RoBERTa fine-tuned): outputs label/score + confidence
+Generator (one LLM, two prompts):
+WHY_FALSE mode: explain why false/misleading, must cite evidence IDs
+WHAT_TRUE mode: propose corrected claim + short support, must cite evidence IDs
+Guardrails (this is how you compete with GPT-4)
+“Cite-or-abstain”: if evidence is weak/contradictory → output INSUFFICIENT_EVIDENCE
+Optional entailment check: ensure each sentence is supported by evidence
