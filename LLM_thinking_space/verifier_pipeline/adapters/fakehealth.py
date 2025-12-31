@@ -1,4 +1,3 @@
-# verifier_pipeline/adapters/fakehealth.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,14 +11,11 @@ import urllib.request
 
 from datasets import Dataset, DatasetDict
 
-
-# Canonical 4-way labels for verifier
 # false=0, mixed=1, true=2, nei=3
 LABEL_FALSE = 0
 LABEL_MIXED = 1
 LABEL_TRUE = 2
 LABEL_NEI = 3
-
 
 def clean_text(x: object) -> str:
     if x is None:
@@ -28,20 +24,17 @@ def clean_text(x: object) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-
 def claim_hash(text: str) -> str:
     s = clean_text(text).casefold()
     s = re.sub(r"[^\w\s]", "", s)
     s = re.sub(r"\s+", " ", s).strip()
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
 
-
 def first_present(d: Dict[str, Any], keys: Iterable[str]) -> Optional[Any]:
     for k in keys:
         if k in d and d[k] not in (None, "", []):
             return d[k]
     return None
-
 
 def to_float(x: Any) -> Optional[float]:
     if x is None:
@@ -50,7 +43,6 @@ def to_float(x: Any) -> Optional[float]:
         return float(str(x).strip())
     except Exception:
         return None
-
 
 @dataclass(frozen=True)
 class FakeHealthAdapter:
@@ -62,7 +54,6 @@ class FakeHealthAdapter:
     name: str = "fakehealth"
     source_id: int = 1
 
-    # Pin for reproducibility
     revision: str = "ec9379de8f8f13af8c436dd6dd9bfaddacd2df30"
 
     repo_zip_url: str = "https://github.com/EnyanDai/FakeHealth/archive/{rev}.zip"
@@ -86,7 +77,6 @@ class FakeHealthAdapter:
             print(f"[FakeHealth] downloading: {url}")
             urllib.request.urlretrieve(url, zip_path)
 
-        # Extract once
         marker = extract_dir / ".extracted"
         if not marker.exists():
             print(f"[FakeHealth] extracting -> {extract_dir}")
@@ -94,7 +84,6 @@ class FakeHealthAdapter:
                 zf.extractall(extract_dir)
             marker.write_text("ok", encoding="utf-8")
 
-        # Find repo root folder inside extract_dir (FakeHealth-<sha>)
         candidates = [p for p in extract_dir.iterdir() if p.is_dir() and p.name.lower().startswith("fakehealth-")]
         if not candidates:
             raise RuntimeError(f"[FakeHealth] Could not find extracted repo folder in {extract_dir}")
@@ -117,11 +106,9 @@ class FakeHealthAdapter:
     def load(self, cache_dir: str = ".cache") -> DatasetDict:
         repo_root = self.fetch(cache_dir=cache_dir)
 
-        # The repo describes 2 datasets: HealthStory and HealthRelease
         hs = self._load_reviews_json(repo_root, "HealthStory")
         hr = self._load_reviews_json(repo_root, "HealthRelease")
 
-        # Normalize into one split; you’ll do global dedup + split later.
         rows: List[Dict[str, Any]] = []
         rows.extend(self._normalize_reviews(hs, subset="HealthStory"))
         rows.extend(self._normalize_reviews(hr, subset="HealthRelease"))
@@ -136,7 +123,6 @@ class FakeHealthAdapter:
             if not isinstance(r, dict):
                 continue
 
-            # Common key guesses (robust to minor schema differences)
             rid = first_present(r, ["news_id", "newsId", "id", "ID"])
             title = first_present(r, ["title", "Title", "news_title", "headline", "Headline"])
             summary = first_present(r, ["summary", "Summary", "review_summary", "description", "Description"])
@@ -145,13 +131,12 @@ class FakeHealthAdapter:
             rating_raw = first_present(r, ["rating", "Rating", "score", "Score", "overall_rating"])
             rating = to_float(rating_raw)
 
-            # claim_text: prefer title, fallback to summary (still better than dropping everything)
             claim_text = clean_text(title) or clean_text(summary)
 
             if not claim_text or rating is None:
                 continue
 
-            # FakeHealth paper rule: rating < 3 => fake, else real
+            # rating < 3 => fake, else real
             label_id = LABEL_FALSE if rating < 3.0 else LABEL_TRUE
             label_raw = "fake" if label_id == LABEL_FALSE else "real"
 
@@ -173,7 +158,6 @@ class FakeHealthAdapter:
             )
 
         return out
-
 
 if __name__ == "__main__":
     from collections import Counter

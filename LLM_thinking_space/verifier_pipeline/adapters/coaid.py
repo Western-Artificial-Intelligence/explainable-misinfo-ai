@@ -7,6 +7,7 @@ import math
 from collections import Counter
 from datasets import DatasetDict, load_dataset
 
+# false=0, mixed=1, true=2, nei=3
 LABEL_FALSE = 0
 LABEL_MIXED = 1
 LABEL_TRUE = 2
@@ -81,7 +82,7 @@ class CoAIDAdapter:
     name: str = "coaid"
     source_id: int = 3
 
-    revision: str = "e5a2329f72d7785c714982b67c7fb63475fe1fcc" # chatgpt did this... keeping it since it might be worth at some point
+    revision: str = "e5a2329f72d7785c714982b67c7fb63475fe1fcc"
 
     def load(self) -> DatasetDict:
         base = f"hf://datasets/ComplexDataLab/Misinfo_Datasets@{self.revision}/coaid"
