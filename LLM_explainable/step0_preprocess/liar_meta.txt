@@ -1,0 +1,1 @@
+python -m liar --cache_dir ..\.cache --max_rows 3
