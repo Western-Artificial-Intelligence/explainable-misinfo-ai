@@ -1,6 +1,7 @@
 Websearch shit
 Google Programmable Search (Custom Search JSON API) offers 100 queries/day free.
 
+
                  ┌──────────────────────────────┐
 Claim (text) ───▶│ 0) Preprocess / Normalize    │
                  │ - clean whitespace           │
@@ -14,9 +15,7 @@ Claim (text) ───▶│ 0) Preprocess / Normalize    │
                  │ Output: label + score + conf  │
                  └─────────────┬────────────────┘
                                │
-                 (optional routing based on conf)
-                 if conf high & label true → may skip RAG
-                 else → do RAG
+                         (never skip RAG)
                                │
                                ▼
                  ┌──────────────────────────────┐
@@ -34,9 +33,10 @@ Claim (text) ───▶│ 0) Preprocess / Normalize    │
                  ┌──────────────────────────────┐
                  │ 3) Guardrail (Evidence Check) │
                  │ - enough evidence?            │
-                 │ - contradictory evidence?     │
+                 │ - supports vs contradicts?    │
+                 │ - conflicts? -> MIXED         │
                  └───────┬───────────┬──────────┘
-                         │yes        │no/weak
+                         │enough     │no/weak
                          ▼           ▼
           ┌──────────────────────┐   ┌──────────────────────────┐
           │ 4) Generator LLM     │   │ Output: INSUFFICIENT_    │
@@ -56,7 +56,8 @@ Claim (text) ───▶│ 0) Preprocess / Normalize    │
                           ▼
                 ┌──────────────────────────────┐
                 │ 5) Final Packager             │
-                │ JSON: score,label,conf,       │
-                │ explanation/correction, cites │
+                │ JSON: label,score,conf,       │
+                │ explanation/correction,       │
+                │ evidence_used:[E1..], urls    │
                 └──────────────────────────────┘
 

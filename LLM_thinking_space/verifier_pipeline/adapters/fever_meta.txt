@@ -1,1 +1,0 @@
-python -m fever --cache_dir ..\.cache --max_rows 3
