@@ -1,0 +1,8 @@
+# IGNORE BELOW GUY
+python jitter_1.py https://x.com/i/web/status/1245388515749347334
+
+# RUN 1
+python coaid_scrap.py --input-dir ../../data/raw/coaid --output-dir ./result --max-workers 8 --sleep 0.05
+
+# RUN 2
+python coaid_clean.py --input-dir data

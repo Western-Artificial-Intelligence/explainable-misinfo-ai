@@ -1,0 +1,6 @@
+Folder: ./data/fakehealth\HealthRelease
+label distribution (%):
+label
+real    51.85%
+fake    48.15%
+Avg text length: 654.64
