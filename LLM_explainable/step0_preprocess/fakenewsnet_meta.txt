@@ -1,0 +1,1 @@
+python -m fakenewsnet --cache_dir ..\.cache --max_rows 3

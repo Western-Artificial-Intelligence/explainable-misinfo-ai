@@ -1,0 +1,211 @@
+Yep — here are the **best-practice training-time input/output schemas** for each model (what your dataloader feeds + what the model returns during fine-tuning). Assumption: **everything is already English** (`claim_en`, `evidence_en`).
+
+---
+
+## 1) Verifier (RoBERTa classifier) — **must train**
+
+### Training sample schema (pre-tokenization)
+
+```json
+{
+  "id": "string",
+  "claim_en": "string",
+  "y_verdict": "false|mixed|true|nei",
+  "source_id": 0
+}
+```
+
+### Batch input schema (tokenized)
+
+```json
+{
+  "input_ids": [[...], [...]],
+  "attention_mask": [[...], [...]],
+  "labels": [0, 2],
+  "source_id": [0, 5]
+}
+```
+
+* `labels`: int class id (e.g., `false=0,mixed=1,true=2,nei=3`)
+* `source_id`: dataset id (for domain-adversarial head; training-only)
+
+### Model output schema (forward pass)
+
+```json
+{
+  "logits": [[...], [...]],
+  "loss": 0.0,
+
+  "domain_logits": [[...], [...]],
+  "domain_loss": 0.0,
+
+  "total_loss": 0.0
+}
+```
+
+* If you do domain-adversarial: `total_loss = loss + λ * domain_loss`
+* If not: only `logits` + `loss`
+
+---
+
+## 2) Dense Retriever (Dual-Encoder) — **recommended**
+
+### Training sample schema (contrastive)
+
+```json
+{
+  "id": "string",
+  "query_en": "string (usually claim)",
+  "pos_doc_en": "string (evidence chunk)",
+  "neg_docs_en": ["string", "string", "string"]
+}
+```
+
+### Batch input schema (tokenized)
+
+```json
+{
+  "query": { "input_ids": [[...]], "attention_mask": [[...]] },
+  "pos_doc": { "input_ids": [[...]], "attention_mask": [[...]] },
+  "neg_docs": {
+    "input_ids": [[[...],[...],[...]]],
+    "attention_mask": [[[...],[...],[...]]]
+  }
+}
+```
+
+### Model output schema
+
+```json
+{
+  "q_emb": [[...]],
+  "doc_embs": [[...], [...], [...], [...]],
+  "similarity_logits": [[...]],
+  "loss": 0.0
+}
+```
+
+* `doc_embs` usually includes pos + negatives
+* Loss is typically InfoNCE / contrastive cross-entropy
+
+---
+
+## 3) Reranker (Cross-Encoder) — **must train**
+
+Best practice is **pairwise ranking** (pos vs neg).
+
+### Training sample schema (pairwise)
+
+```json
+{
+  "id": "string",
+  "claim_en": "string",
+  "pos_chunk_en": "string",
+  "neg_chunk_en": "string"
+}
+```
+
+### Batch input schema (tokenized)
+
+```json
+{
+  "pos": { "input_ids": [[...]], "attention_mask": [[...]] },
+  "neg": { "input_ids": [[...]], "attention_mask": [[...]] }
+}
+```
+
+### Model output schema
+
+```json
+{
+  "pos_score": [0.0],
+  "neg_score": [0.0],
+  "loss": 0.0
+}
+```
+
+* Loss: margin ranking loss or `-log(sigmoid(pos-neg))`
+
+(Alternative: pointwise `y_relevant∈{0,1}` but pairwise is usually stronger.)
+
+---
+
+## 4) Generator (one LLM, two modes) — **must train**
+
+(Works for both WHY_FALSE and WHAT_TRUE; mode is part of the prompt.)
+
+### Training sample schema (seq2seq / causal)
+
+```json
+{
+  "id": "string",
+  "mode": "WHY_FALSE|WHAT_TRUE",
+  "claim_en": "string",
+  "evidence": [
+    { "chunk_id": "E1", "text_en": "string", "url": "string|null" }
+  ],
+  "target_json_text": "string (the desired output JSON as text)"
+}
+```
+
+### Batch input schema (tokenized)
+
+```json
+{
+  "input_ids": [[...], [...]],
+  "attention_mask": [[...], [...]],
+  "labels": [[...], [...]]
+}
+```
+
+* `labels`: tokenized target sequence (pad positions masked to `-100`)
+
+### Model output schema
+
+```json
+{
+  "logits": [[[...]]],
+  "loss": 0.0
+}
+```
+
+---
+
+## 5) Guardrail checker (NLI / entailment) — **recommended**
+
+### Training sample schema
+
+```json
+{
+  "id": "string",
+  "premise_en": "string (evidence chunk OR concat evidence)",
+  "hypothesis_en": "string (one generated sentence)",
+  "y_nli": "entailed|contradicted|neutral"
+}
+```
+
+### Batch input schema (tokenized)
+
+```json
+{
+  "input_ids": [[...]],
+  "attention_mask": [[...]],
+  "labels": [0]
+}
+```
+
+### Model output schema
+
+```json
+{
+  "logits": [[...]],
+  "loss": 0.0
+}
+```
+
+---
+
+### Summary of “best practice” training jobs
+
+* **Train**: Verifier + Reranker + Generator
+* **Recommended**: Retriever + NLI guardrail
