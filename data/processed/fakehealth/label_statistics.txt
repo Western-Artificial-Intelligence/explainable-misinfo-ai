@@ -1,0 +1,25 @@
+FakeHealth Label Statistics
+==================================================
+
+Label Distribution:
+label
+true     754
+false    749
+mixed    734
+Name: count, dtype: int64
+
+Label by Content Type:
+label          false  mixed  true
+content_type                     
+HealthRelease    288    220    91
+HealthStory      461    514   663
+
+Expert Rating Distribution:
+expert_rating
+3    735
+2    528
+4    517
+5    237
+1    188
+0     32
+Name: count, dtype: int64

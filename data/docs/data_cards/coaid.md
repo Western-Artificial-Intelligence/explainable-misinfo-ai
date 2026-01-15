@@ -103,28 +103,24 @@ CoAID dataset is provided for research use. Check the GitHub repository README f
 ## Unified Schema 
 
 ### Claim/News Data
-| Column           | Type | Notes                                     |
-|------------------|------|-------------------------------------------|
-| fact_check_url   | str  | Fact-check/verification source URL        |
-| news_url         | str  | Original claim/news source URL            |
-| claim_text       | str  | Claim title or headline                   |
-| label            | str  | Label (True/False)                        |
-| dataset          | str  | Name of Dataset it comes from             |
-| split            | str  | train/valid/test                          |
-| label_confidence | str  | Gold/Weak                                 |
-| article_text     | str  | claim/news source article text            |
-| content_status   | str  | title_only/partial/full_article           |
-| archive_url      | str  | archive URL                               |
-| is_archived      | bool | Archived indicator                        |
-| source_domain    | str  | source domain from url                    |
-| is_hydrated      | bool | hydration indicator                       |
-| fetch_status     | str  | Status of article scraping succession     |
-| lang             | str  | language of article                       |
-| content_char_len | int  | number of chars in article                |
-| claim_norm_hash  | str  | normalized SHA-1 hash of that title       |
-| ingested_at      | str  | time ingested                             |
-| fetch_attempts   | int  | total number of attempts to fetch article |
-| last_fetch_at    | str  | last fetched time                         |
+
+| Position | Column           | Type | Notes                                               |
+|----------|------------------|------|-----------------------------------------------------|
+| 1        | id               | str  | Unique identifier (JSON filename, e.g., "2635.json") |
+| 2        | label            | str  | Clean & Normalized Truthfulness label (6-class)     |
+| 3        | claim_text       | str  | The factual claim being checked                     |
+| 4        | dataset          | str  | dataset classifier column                           |
+| 5        | article_text     | str  | article text (None for all)                         |
+| 6        | label_raw        | str  | Raw label                                       |
+| 7        | label_3way       | str  | true/mixed/false                                    |
+| 8        | label_mode       | int  | 0 for liar, 1 otherwise                             |
+| 9        | content_status   | str  | title_only, partial, full_article                   |
+| 10       | label_confidence | str  | Gold/Weak based on count of total count of votes    |
+| 11       | label_bin        | int  | -100 for liar                                       |
+| 12       | source_id        | int  | 0 for Liar, dataset integer classifier              |
+| 13       | claim_norm_hash  | str  | Normalized claim text hash                          |
+| 14       | lang             | str  | claim text language (en)                            |
+| 15       | content_char_len | int  | Article text length                                 |
 
 ## Notes/Quirks
 - **File-Format**:Parquet file format

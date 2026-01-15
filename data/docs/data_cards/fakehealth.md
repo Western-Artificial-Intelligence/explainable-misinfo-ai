@@ -211,54 +211,24 @@ Dai, E., Zhao, Y., Zhu, H., Tian, Z., Tan, Z., & Huang, L. (2022). "Towards Fake
 
 ## Unified Schema Fields
 
-### Core Fields
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | str | Article identifier (e.g., "news_reviews_00000") |
-| `dataset` | str | "fakehealth" |
-| `split` | str | "train" / "val" / "test" |
-| `claim_text` | str | Article headline/title |
-| `article_text` | str | Full article body text |
-| `label` | str | "true" / "false" / "mixed" (derived from expert reviews) |
-| `label_confidence` | str | "gold" (expert-reviewed) |
+| Position | Column           | Type | Notes                                                |
+|----------|------------------|------|------------------------------------------------------|
+| 1        | id               | str  | Unique identifier (JSON filename, e.g., "2635.json") |
+| 2        | label            | str  | Clean & Normalized Truthfulness label       |
+| 3        | claim_text       | str  | The factual claim being checked                      |
+| 4        | dataset          | str  | dataset classifier column                            |
+| 5        | article_text     | str  | article text                           |
+| 6        | label_raw        | str  | Raw label                                            |
+| 7        | label_3way       | str  | true/mixed/false                                     |
+| 8        | label_mode       | int  | 0 for liar or fakehealth, 1 otherwise                |
+| 9        | content_status   | str  | title_only, partial, full_article                    |
+| 10       | label_confidence | str  | Gold/Weak      |
+| 11       | label_bin        | int  | -100 for liar and fakehealth                         |
+| 12       | source_id        | int  | 0 for Liar, dataset integer classifier               |
+| 13       | claim_norm_hash  | str  | Normalized claim text hash                           |
+| 14       | lang             | str  | claim text language (en)                             |
+| 15       | content_char_len | int  | Article text length                                  |
 
-### Content Metadata
-| Field | Type | Description |
-|-------|------|-------------|
-| `content_status` | str | "full_article" / "partial" / "title_only" |
-| `content_char_len` | int | Character count of article text |
-| `content_type` | str | "HealthRelease" / "HealthStory" |
-| `is_hydrated` | bool | Whether article text was fetched |
-| `lang` | str | Detected language code |
-
-### URL & Source
-| Field | Type | Description |
-|-------|------|-------------|
-| `news_url` | str | Original article URL |
-| `source_domain` | str | Domain extracted from URL |
-| `archive_url` | str | Wayback Machine URL (if used) |
-| `is_archived` | bool | Whether content from archive |
-
-### Fetch Metadata
-| Field | Type | Description |
-|-------|------|-------------|
-| `fetch_status` | str | "success" / "existing_text" / "http_404" / etc. |
-| `fetch_attempts` | int | Number of fetch attempts |
-| `last_fetch_at` | str | ISO timestamp of last fetch |
-| `ingested_at` | str | ISO timestamp of ingestion |
-| `claim_norm_hash` | str | SHA1 hash of normalized title |
-
-### Expert Review Fields (FakeHealth-specific)
-| Field | Type | Description |
-|-------|------|-------------|
-| `expert_rating` | int | Overall quality rating (1-5) |
-| `expert_reviewers` | list | Expert reviewer names |
-| `expert_unsatisfactory_count` | int | Count of "Not Satisfactory" criteria |
-| `expert_criteria` | list | Full 10-point evaluation |
-| `expert_summary` | dict | Expert review summary |
-| `expert_category` | str | Content category |
-| `expert_tags` | list | Topic tags |
-| `expert_news_source` | str | Original news source |
 
 ## Label Derivation Strategy
 
@@ -314,8 +284,7 @@ data/processed/fakehealth/
 ├── unified_fakehealth.parquet          # Full dataset
 ├── unified_fakehealth_sample.csv       # Sample (100 rows)
 ├── label_statistics.txt                # Label distribution stats
-└── batches/
-    └── hydrated_batch_*.parquet        # Intermediate batches
+
 ```
 
 ## Usage Example
