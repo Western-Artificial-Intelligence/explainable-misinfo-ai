@@ -68,22 +68,27 @@ The LIAR dataset is provided for research use. Citation of Wang (2017) is requir
 
 ## Unified Schema (Key Files)
 
-### unified_liar_train.tsv / unified_liar_valid.tsv / unified_liar_test.tsv
+### unified_liar.parquet
 
 Parquet file-format. Column order (left to right) is as follows:
 
-| Position | Column           | Type | Notes                                                          |
-|----------|------------------|------|----------------------------------------------------------------|
-| 1        | claim_id         | str | Unique identifier (JSON filename, e.g., "2635.json")           |
-| 2        | label            | str | Truthfulness label (6-class)                                   |
-| 3        | claim_text       | str | The factual claim being checked                                |
-| 4        | subject          | str | Topic categories (comma-separated, e.g., "abortion")           |
-| 5        | context          | str | Reference/context (URL, article excerpt, or event description) |
-| 6        | dataset          | str | Original Dataset name                                          |
-| 7        | split            | str | train/valid/test                                               |
-| 8        | raw_label        | str | Original Label                                                 |
-| 9        | content_status   | str | title_only, partial, full_article                              |
-| 10       | label_confidence | str | Gold/Weak based on count of total count of votes               |
+| Position | Column           | Type | Notes                                               |
+|----------|------------------|------|-----------------------------------------------------|
+| 1        | id               | str  | Unique identifier (JSON filename, e.g., "2635.json") |
+| 2        | label            | str  | Clean & Normalized Truthfulness label (6-class)     |
+| 3        | claim_text       | str  | The factual claim being checked                     |
+| 4        | dataset          | str  | dataset classifier column                           |
+| 5        | article_text     | str  | article text (None for all)                         |
+| 6        | label_raw        | str  | Raw label                                       |
+| 7        | label_3way       | str  | true/mixed/false                                    |
+| 8        | label_mode       | int  | 0 for liar, 1 otherwise                             |
+| 9        | content_status   | str  | title_only, partial, full_article                   |
+| 10       | label_confidence | str  | Gold/Weak based on count of total count of votes    |
+| 11       | label_bin        | int  | -100 for liar                                       |
+| 12       | source_id        | int  | 0 for Liar, dataset integer classifier              |
+| 13       | claim_norm_hash  | str  | Normalized claim text hash                          |
+| 14       | lang             | str  | claim text language (en)                            |
+| 15       | content_char_len | int  | Article text length                                 |
 
 ## Notes/Quirks
 - **Label Confidence**: Based on the total number of votes across all categories of labels, if <10 then weak, else gold.
