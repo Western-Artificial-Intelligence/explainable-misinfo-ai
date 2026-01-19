@@ -275,30 +275,23 @@ Jiang, Y., Bordes, A., Cancedda, N., Hoffman, M., & Petrowski, B. (2020). "HoVer
 
 ## Unified Schema Fields
 
-### Core Fields
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | str | Unique claim identifier (UUID) |
-| `dataset` | str | "hover" |
-| `split` | str | "train" / "dev" / "test" |
-| `claim_text` | str | Factual claim to verify |
-| `label` | str | "true" / "false" (SUPPORTED / NOT_SUPPORTED) |
-| `label_confidence` | str | "gold" (expert-annotated) |
-
-### HoVer-Specific Fields
-| Field | Type | Description |
-|-------|------|-------------|
-| `supporting_facts` | list | List of [Wikipedia title, paragraph idx] pairs |
-| `num_hops` | int | Number of reasoning hops required (1, 2, or 3) |
-| `hpqa_id` | str | Reference ID to QAMR corpus |
-
-### Metadata Fields
-| Field | Type | Description |
-|-------|------|-------------|
-| `content_status` | str | "title_only" (claims are short text) |
-| `content_char_len` | int | Character count of claim |
-| `claim_norm_hash` | str | SHA1 hash of normalized claim |
-| `ingested_at` | str | ISO timestamp of ingestion |
+| Position | Column           | Type | Notes                                                |
+|----------|------------------|------|------------------------------------------------------|
+| 1        | id               | str  | Unique identifier (JSON filename, e.g., "2635.json") |
+| 2        | label            | str  | Clean & Normalized Truthfulness label                |
+| 3        | claim_text       | str  | The factual claim being checked                      |
+| 4        | dataset          | str  | dataset classifier column                            |
+| 5        | article_text     | str  | article text                                         |
+| 6        | label_raw        | str  | Raw label                                            |
+| 7        | label_3way       | str  | true/mixed/false                                     |
+| 8        | label_mode       | int  | 0 for liar or fakehealth, 1 otherwise                |
+| 9        | content_status   | str  | title_only, partial, full_article                    |
+| 10       | label_confidence | str  | Gold/Weak                                            |
+| 11       | label_bin        | int  | -100 for liar and fakehealth else true/false         |
+| 12       | source_id        | int  | 0 for Liar, dataset integer classifier               |
+| 13       | claim_norm_hash  | str  | Normalized claim text hash                           |
+| 14       | lang             | str  | claim text language (en)                             |
+| 15       | content_char_len | int  | Article text length                                  |
 
 ## Label Information
 

@@ -219,54 +219,24 @@ Shu, K., Mahudeswaran, D., Wang, S., Lee, D., & Liu, H. (2020). "FakeNewsNet: A 
 
 ## Unified Schema Fields
 
-### Core Fields
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | str | Unique article identifier |
-| `dataset` | str | "fakenewsnet" |
-| `split` | str | "train" / "val" / "test" |
-| `claim_text` | str | Article headline/title |
-| `article_text` | str | Full article body text |
-| `label` | str | "true" / "false" |
-| `label_confidence` | str | "gold" (fact-checked) |
+| Position | Column           | Type | Notes                                                |
+|----------|------------------|------|------------------------------------------------------|
+| 1        | id               | str  | Unique identifier (JSON filename, e.g., "2635.json") |
+| 2        | label            | str  | Clean & Normalized Truthfulness label                |
+| 3        | claim_text       | str  | The factual claim being checked                      |
+| 4        | dataset          | str  | dataset classifier column                            |
+| 5        | article_text     | str  | article text                                         |
+| 6        | label_raw        | str  | Raw label                                            |
+| 7        | label_3way       | str  | true/mixed/false                                     |
+| 8        | label_mode       | int  | 0 for liar or fakehealth, 1 otherwise                |
+| 9        | content_status   | str  | title_only, partial, full_article                    |
+| 10       | label_confidence | str  | Gold/Weak                                            |
+| 11       | label_bin        | int  | -100 for liar and fakehealth else true/false         |
+| 12       | source_id        | int  | 0 for Liar, dataset integer classifier               |
+| 13       | claim_norm_hash  | str  | Normalized claim text hash                           |
+| 14       | lang             | str  | claim text language (en)                             |
+| 15       | content_char_len | int  | Article text length                                  |
 
-### Content Metadata
-| Field | Type | Description |
-|-------|------|-------------|
-| `content_status` | str | "full_article" / "partial" / "title_only" |
-| `content_char_len` | int | Character count of article text |
-| `source_dataset` | str | "politifact" / "gossipcop" |
-| `is_hydrated` | bool | Whether article text was fetched |
-| `lang` | str | Detected language code |
-
-### URL & Source
-| Field | Type | Description |
-|-------|------|-------------|
-| `news_url` | str | Original article URL |
-| `source_domain` | str | Domain extracted from URL |
-| `archive_url` | str | Wayback Machine URL (if used) |
-| `is_archived` | bool | Whether content from archive |
-
-### Fetch Metadata
-| Field | Type | Description |
-|-------|------|-------------|
-| `fetch_status` | str | "success" / "existing_text" / "http_404" / etc. |
-| `fetch_attempts` | int | Number of fetch attempts |
-| `last_fetch_at` | str | ISO timestamp of last fetch |
-| `ingested_at` | str | ISO timestamp of ingestion |
-| `claim_norm_hash` | str | SHA1 hash of normalized title |
-
-### Original Metadata (Preserved)
-| Field | Type | Description |
-|-------|------|-------------|
-| `author` | str | Article author name |
-| `publish_date` | str | Publication date/time |
-| `source` | str | News source name |
-| `top_img` | str | Featured image URL |
-| `images` | list | All image URLs in article |
-| `meta_description` | str | Article meta description |
-| `meta_keywords` | str | Article meta keywords |
-| `tags` | list | Article tags |
 
 ## Label Information
 
