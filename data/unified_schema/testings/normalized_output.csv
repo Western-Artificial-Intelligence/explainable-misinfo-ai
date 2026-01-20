@@ -3,19 +3,19 @@ Hello world.,hello world.
 THIS IS ALL CAPS.,this is all caps.
 this is all lowercase.,this is all lowercase.
 MiXeD CaSe LeTtErS aRe FuN.,mixed case letters are fun.
-I can’t believe it’s already Monday.,i can t believe it s already monday.
-Wait… what just happened?,wait what just happened?
+I can’t believe it’s already Monday.,i can't believe it's already monday.
+Wait… what just happened?,wait... what just happened?
 No way!!!,no way!
 Seriously????,seriously?
-This is fine 🙂,this is fine 🙂
-This is *not* fine 😡,this is not fine 😡
-LOL that was funny 😂😂😂,lol that was funny 😂 😂 😂
-I’m crying rn 😭,i m crying rn 😭
+This is fine 🙂,this is fine
+This is *not* fine 😡,this is not fine
+LOL that was funny 😂😂😂,lol that was funny
+I’m crying rn 😭,i'm crying rn
 Visit https://example.com for details.,visit <URL> for details.
 Check out www.google.com right now.,check out <URL> right now.
-Email me at fakeemail@test.com.,email me at fakeemail <USER>
-Follow me @username.,follow me <USER>
-Thanks @john_doe for the help!,thanks <USER> for the help!
+Email me at fakeemail@test.com.,email me at fakeemail test.com.
+Follow me @username.,follow me username.
+Thanks @john_doe for the help!,thanks john_doe for the help!
 Trending topic: #BreakingNews,trending topic: breakingnews
 I love #MachineLearning and #AI.,i love machinelearning and ai.
 HashtagsCanBeAnnoying #sometimes,hashtagscanbeannoying sometimes
@@ -36,21 +36,21 @@ are
 everywhere.",newlines are everywhere.
 This sentence has trailing spaces.    ,this sentence has trailing spaces.
 What about leading spaces?,what about leading spaces?
-Quotes “like this” are fancy.,quotes like this are fancy.
+Quotes “like this” are fancy.,"quotes ""like this"" are fancy."
 "And ""like this"" are plain.","and ""like this"" are plain."
-Single quotes aren’t rare.,single quotes aren t rare.
+Single quotes aren’t rare.,single quotes aren't rare.
 Backticks `code` look different.,backticks code look different.
 Math symbols: a ≤ b ≥ c.,math symbols: a b c.
 Logical ops: x && y || z.,logical ops: x y z.
-Emojis mixed with text 👍 good job.,emojis mixed with text 👍 good job.
-🇨🇦 is the Canadian flag.,🇨 🇦 is the canadian flag.
-Weather today is ☀️🌧️❄️.,weather today is ☀ 🌧 ❄ .
+Emojis mixed with text 👍 good job.,emojis mixed with text good job.
+🇨🇦 is the Canadian flag.,is the canadian flag.
+Weather today is ☀️🌧️❄️.,weather today is .
 Repeated punctuation!!!!!,repeated punctuation!
-Ellipses...... everywhere.,ellipses. everywhere.
+Ellipses...... everywhere.,ellipses...... everywhere.
 Why would someone do this????!!!!,why would someone do this?!
 Short sentence.,short sentence.
 Very very very very very long sentence that just keeps going without saying much of anything useful at all.,very very very very very long sentence that just keeps going without saying much of anything useful at all.
-This—is—an—em—dash—test.,this is an em dash test.
+This—is—an—em—dash—test.,this-is-an-em-dash-test.
 Hyphen-test-case.,hyphen-test-case.
 Underscore_test_case.,underscore_test_case.
 Slash/test/case.,slash/test/case.
@@ -78,8 +78,8 @@ Scientific notation: 1.2e-5.,scientific notation: 1.2e-5.
 Percentages like 99.9%.,percentages like 99.9 .
 Fractions such as 3/4 are common.,fractions such as 3/4 are common.
 Currency symbols ¥ £ ₩ ₹.,currency symbols .
-Emojis only 😂🔥💯.,emojis only 😂 🔥 💯 .
-Text then emoji then text 👍 ok 👍.,text then emoji then text 👍 ok 👍 .
+Emojis only 😂🔥💯.,emojis only .
+Text then emoji then text 👍 ok 👍.,text then emoji then text ok .
 Random symbols @#$%^&*.,random symbols # .
 File path C:\Users\Test\file.txt.,file path c: users test file.txt.
 Unix path /usr/local/bin.,unix path /usr/local/bin.
@@ -94,7 +94,7 @@ std::vector<int>,std::vector<int>
 Warning!!! Disk almost full.,warning! disk almost full.
 ERROR: Null pointer exception.,error: null pointer exception.
 DEBUG mode enabled.,debug mode enabled.
-Casual slang bruh that’s wild.,casual slang bruh that s wild.
+Casual slang bruh that’s wild.,casual slang bruh that's wild.
 Internet slang idk tbh imo.,internet slang idk tbh imo.
 Abbreviations like etc. and e.g.,abbreviations like etc. and e.g.
 Academic tone: The results indicate significance.,academic tone: the results indicate significance.
@@ -108,18 +108,18 @@ The cake was eaten.,the cake was eaten.
 She ate the cake.,she ate the cake.
 "Rhetorical question, right?","rhetorical question, right?"
 Sarcasm sure that worked perfectly.,sarcasm sure that worked perfectly.
-wow great job 🙄,wow great job 🙄
+wow great job 🙄,wow great job
 thsi is wrnog.,thsi is wrnog.
 duck instead of fuck.,duck instead of fuck.
 word word word test.,word word word test.
 HTTPS://EXAMPLE.COM,<URL>
 https://site.com?a=1&b=2,<URL>
-@user123,<USER>
+@user123,user123
 #covid19,covid19
 #ThisIsATest,thisisatest
 #this_is_test,this_is_test
-hi😂there😂friend,hi 😂 there 😂 friend
-😂😂😂😂😂😂😂,😂 😂 😂 😂 😂 😂 😂
+hi😂there😂friend,hi there friend
+😂😂😂😂😂😂😂,
 h e l l o,h e l l o
 h  e   l    l     o,h e l l o
 sooooo good,sooooo good
@@ -127,8 +127,8 @@ ALL CAPS ANGER MODE,all caps anger mode
 lowercase whisper mode,lowercase whisper mode
 MiXeD CAPS for EmPhAsIs,mixed caps for emphasis
 . . .,. . .
-“He said no.”,he said no.
-— she paused — then spoke.,she paused then spoke.
+“He said no.”,"""he said no."""
+— she paused — then spoke.,- she paused - then spoke.
 14:30 vs 2:30 PM,14:30 vs 2:30 pm
 "Jan 19, 2026","jan 19, 2026"
 2026-01-19T21:00:00Z,2026-01-19t21:00:00z
@@ -136,49 +136,49 @@ true false TRUE FALSE,true false true false
 null None NaN,null none nan
 (a+b)^2 = a^2+2ab+b^2,(a b) 2 a 2 2ab b 2
 https://x.com/%20test,<URL>
-👍🏽👍🏻👍🏿,👍 🏽 👍 🏻 👍 🏿
-🧑‍💻👩‍💻👨‍💻,🧑 💻 👩 💻 👨 💻
+👍🏽👍🏻👍🏿,
+🧑‍💻👩‍💻👨‍💻,
 ← ↑ → ↓,
 x² and H₂O,x² and h₂o
-✔️ ❌,✔ ❌
-★★★★☆,★ ★ ★ ★ ☆
+✔️ ❌,
+★★★★☆,
 - item one,- item one
 1) first,1) first
 a > b < c,a > b < c
 ~50 items,50 items
-1–10 inclusive,1 10 inclusive
+1–10 inclusive,1-10 inclusive
 %,
 $,
 +-=*/,- /
 lol u good?,lol u good?
 "Text with newline at end.
 ",text with newline at end.
-Sentence with trailing emoji 😂,sentence with trailing emoji 😂
-😎 cool.,😎 cool.
+Sentence with trailing emoji 😂,sentence with trailing emoji
+😎 cool.,cool.
 #StartHere now.,starthere now.
-@admin please read.,<USER> please read.
+@admin please read.,admin please read.
 &amp; &lt; &gt;,amp; lt; gt;
-✨,✨
+✨,
 asdfghjkl,asdfghjkl
 lksjdflksjdf,lksjdflksjdf
 123abc!!!,123abc!
 -/-/- test,-/-/- test
 (test [inner {deep}]),(test inner deep )
 """she said 'no'""","""she said 'no'"""
-y’all shouldn’t’ve done that.,y all shouldn t ve done that.
-don’t won’t can’t,don t won t can t
+y’all shouldn’t’ve done that.,y'all shouldn't've done that.
+don’t won’t can’t,don't won't can't
 Sentence ending with space . ,sentence ending with space .
-😂 #fun,😂 fun
-@me https://t.co/x,<USER> <URL>
-@u #tag 😂!!!,<USER> tag 😂 !
+😂 #fun,fun
+@me https://t.co/x,me <URL>
+@u #tag 😂!!!,u tag !
 ?!?!!,?!?!
 ⇒ ⇐ ⇔,
 ∑ ∫ √,
 $100 CAD,100 cad
 5kg 10m 3L,5kg 10m 3l
 98.6°F,98.6 f
-🇺🇸 🇯🇵 🇫🇷,🇺 🇸 🇯 🇵 🇫 🇷
-🙂🙂🙂,🙂 🙂 🙂
+🇺🇸 🇯🇵 🇫🇷,
+🙂🙂🙂,
 ok.,ok.
 a,a
 .,.
@@ -188,8 +188,8 @@ f*** this,f this
 [REDACTED],redacted
 user_name_01,user_name_01
 ./data/input.txt,./data/input.txt
-👨‍👩‍👧‍👦,👨 👩 👧 👦
-☺︎,☺
+👨‍👩‍👧‍👦,
+☺︎,
 x≠y,x y
 a | b | c,a b c
 ~home,home
@@ -200,5 +200,5 @@ a | b | c,a b c
 50% off,50 off
 1st 2nd 3rd,1st 2nd 3rd
 twenty-one 21,twenty-one 21
-😂 + 1 = 2,😂 1 2
+😂 + 1 = 2,1 2
 Final test sentence done.,final test sentence done.
