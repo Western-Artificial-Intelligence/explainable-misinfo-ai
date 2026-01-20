@@ -6,14 +6,16 @@ cd fakehealth
 python ./fakehealth.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\fakehealth" --test
 cd ..
 
+
+
 cd fakenewsnet
-python ./fakenewsnet.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\fakenewsnet" --test
+python ./fakenewsnet.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\fakenewsnet"
 cd ..
 
 cd hover
-python ./hover.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\hover" --test
+python ./hover.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\hover"
 cd ..
 
 cd liar
-python ./liar.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\liar" --test
+python ./liar.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\liar"
 cd ..
