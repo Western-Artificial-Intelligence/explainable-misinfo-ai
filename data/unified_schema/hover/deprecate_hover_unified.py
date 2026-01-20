@@ -20,7 +20,7 @@ if str(DATA_DIR) not in sys.path:
 import os
 import json
 import pandas as pd
-from article_scraping import threaded_hydrate
+from data.unified_schema.hover.deprecate_article_scraping import threaded_hydrate
 from data.unified_schema.cleanup_schema import cleanup
 import argparse
 
