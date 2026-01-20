@@ -3,7 +3,7 @@ import hashlib
 import re
 
 try:
-    from data.unified_schema.coaid.article_scraping import _claim_norm_hash
+    from data.unified_schema.coaid.deprecate_article_scraping import _claim_norm_hash
 except Exception:
     def _claim_norm_hash(title):
         if title is None:
@@ -11,7 +11,6 @@ except Exception:
         s = re.sub(r'\s+', ' ', str(title).strip().lower())
         return hashlib.sha1(s.encode('utf-8')).hexdigest()
 
-# language detection (optional and light)
 try:
     from langdetect import detect
     LANGDETECT_AVAILABLE = True
