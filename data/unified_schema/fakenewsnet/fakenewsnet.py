@@ -169,9 +169,9 @@ def _hydrate_one(url: object) -> Tuple[Optional[str], str]:
             u,
             timeout=(5.0, 12.0),
             max_attempts=2,
-            use_wayback=True,
+            use_wayback=False,
             respect_robots=True,
-            return_meta=True,
+            return_meta=False,
         )
     except Exception:
         return None, "worker_exception"
