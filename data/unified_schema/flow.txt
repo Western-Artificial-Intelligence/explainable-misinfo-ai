@@ -1,0 +1,19 @@
+cd coaid
+python ./coaid.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\coaid" --test
+cd ..
+
+cd fakehealth
+python ./fakehealth.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\fakehealth" --test
+cd ..
+
+cd fakenewsnet
+python ./fakenewsnet.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\fakenewsnet" --test
+cd ..
+
+cd hover
+python ./hover.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\hover" --test
+cd ..
+
+cd liar
+python ./liar.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\liar" --test
+cd ..

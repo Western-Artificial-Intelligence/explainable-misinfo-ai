@@ -162,9 +162,9 @@ def _hydrate_one(url: str, throttle_seconds: float) -> Tuple[Optional[str], Opti
         u,
         timeout=(5.0, 12.0),
         max_attempts=2,
-        use_wayback=True,
+        use_wayback=False,
         respect_robots=True,
-        return_meta=True,
+        return_meta=False,
     )
 
     fetch_status = None
