@@ -1,21 +1,21 @@
 cd coaid
-python ./coaid.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\coaid" --test
+python ./coaid.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\_coaid_tmp"
 cd ..
 
 cd fakehealth
-python ./fakehealth.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\fakehealth" --test
+python ./fakehealth.py --threads 10 --save-dir "C:\Users\User\Documents\Western_AI\explainable-misinfo-ai\data\processed\_fakehealth_tmp"
 cd ..
 
 
 
 cd fakenewsnet
-python ./fakenewsnet.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\fakenewsnet"
+python ./fakenewsnet.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\_fakenewsnet_tmp"
 cd ..
 
 cd hover
-python ./hover.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\hover"
+python ./hover.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\_hover_tmp"
 cd ..
 
 cd liar
-python ./liar.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\liar"
+python ./liar.py --threads 12 --save-dir "C:\Users\insoo\Documents\Western_WAI\explainable-misinfo-ai\data\processed\_liar_tmp"
 cd ..

@@ -52,3 +52,10 @@ liar
 true: 2053 rows
 false: 3554 rows
 mixed: 7184 rows
+
+Total: 70,330 rows:
+coaid: 5,975
+fakehealth: 2,199
+fakenewsnet: 23,194
+hover: 26,171
+liar: 12,791

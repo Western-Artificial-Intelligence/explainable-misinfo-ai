@@ -37,6 +37,7 @@ def encode_texts(
     return model.encode(
         list(texts),
         batch_size=batch_size,
+        device=device,
         normalize_embeddings=True,
         convert_to_numpy=True,
         show_progress_bar=False,
