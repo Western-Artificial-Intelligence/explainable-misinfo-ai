@@ -18,4 +18,3 @@ __pycache__/
 .cache/
 .logs/
 tests/
-/data/processed/*_tmp/
