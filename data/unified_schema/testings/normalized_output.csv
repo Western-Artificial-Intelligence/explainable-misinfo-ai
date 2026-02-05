@@ -1,0 +1,204 @@
+raw_text,clean_default
+Hello world.,hello world.
+THIS IS ALL CAPS.,this is all caps.
+this is all lowercase.,this is all lowercase.
+MiXeD CaSe LeTtErS aRe FuN.,mixed case letters are fun.
+I can’t believe it’s already Monday.,i can't believe it's already monday.
+Wait… what just happened?,wait... what just happened?
+No way!!!,no way!
+Seriously????,seriously?
+This is fine 🙂,this is fine
+This is *not* fine 😡,this is not fine
+LOL that was funny 😂😂😂,lol that was funny
+I’m crying rn 😭,i'm crying rn
+Visit https://example.com for details.,visit <URL> for details.
+Check out www.google.com right now.,check out <URL> right now.
+Email me at fakeemail@test.com.,email me at fakeemail test.com.
+Follow me @username.,follow me username.
+Thanks @john_doe for the help!,thanks john_doe for the help!
+Trending topic: #BreakingNews,trending topic: breakingnews
+I love #MachineLearning and #AI.,i love machinelearning and ai.
+HashtagsCanBeAnnoying #sometimes,hashtagscanbeannoying sometimes
+The price is $19.99 only.,the price is 19.99 only.
+I paid 30€ for this.,i paid 30 for this.
+Temperature reached -12.5°C last night.,temperature reached -12.5 c last night.
+The value of pi is approximately 3.14159.,the value of pi is approximately 3.14159.
+He scored 100/100 on the exam.,he scored 100/100 on the exam.
+Today is 2026-01-19.,today is 2026-01-19.
+The meeting is at 3:45 PM.,the meeting is at 3:45 pm.
+Call me at 123-456-7890.,call me at 123-456-7890.
+Version v2.0.1 was released.,version v2.0.1 was released.
+Error code: ERR_404_NOT_FOUND.,error code: err_404_not_found.
+Multiple     spaces     here.,multiple spaces here.
+Tabs	and	more	tabs.,tabs and more tabs.
+"Newlines
+are
+everywhere.",newlines are everywhere.
+This sentence has trailing spaces.    ,this sentence has trailing spaces.
+What about leading spaces?,what about leading spaces?
+Quotes “like this” are fancy.,"quotes ""like this"" are fancy."
+"And ""like this"" are plain.","and ""like this"" are plain."
+Single quotes aren’t rare.,single quotes aren't rare.
+Backticks `code` look different.,backticks code look different.
+Math symbols: a ≤ b ≥ c.,math symbols: a b c.
+Logical ops: x && y || z.,logical ops: x y z.
+Emojis mixed with text 👍 good job.,emojis mixed with text good job.
+🇨🇦 is the Canadian flag.,is the canadian flag.
+Weather today is ☀️🌧️❄️.,weather today is .
+Repeated punctuation!!!!!,repeated punctuation!
+Ellipses...... everywhere.,ellipses...... everywhere.
+Why would someone do this????!!!!,why would someone do this?!
+Short sentence.,short sentence.
+Very very very very very long sentence that just keeps going without saying much of anything useful at all.,very very very very very long sentence that just keeps going without saying much of anything useful at all.
+This—is—an—em—dash—test.,this-is-an-em-dash-test.
+Hyphen-test-case.,hyphen-test-case.
+Underscore_test_case.,underscore_test_case.
+Slash/test/case.,slash/test/case.
+"Colon:test;semicolon,test.","colon:test;semicolon,test."
+Parentheses (with text inside).,parentheses (with text inside).
+Brackets [are also used].,brackets are also used .
+Braces {sometimes too}.,braces sometimes too .
+Angle brackets <html-like>.,angle brackets <html-like>.
+Markdown **bold** text.,markdown bold text.
+Markdown *italic* text.,markdown italic text.
+Markdown ~~strikethrough~~ text.,markdown strikethrough text.
+Bullet-like • text symbol.,bullet-like text symbol.
+Arrow -> goes here.,arrow -> goes here.
+Unicode test: café naïve résumé.,unicode test: café naïve résumé.
+Accents in Spanish: niño mañana corazón.,accents in spanish: niño mañana corazón.
+Korean text: 안녕하세요 반갑습니다.,korean text: 안녕하세요 반갑습니다.
+Japanese text: こんにちは世界。,japanese text: こんにちは世界
+Chinese text: 你好，世界。,chinese text: 你好 世界
+Mixed language sentence 안녕 hello hi.,mixed language sentence 안녕 hello hi.
+Numbers spelled out: one two three.,numbers spelled out: one two three.
+"Roman numerals: I, V, X, L, C.","roman numerals: i, v, x, l, c."
+Binary number: 101010.,binary number: 101010.
+Hex value: 0xFFEEAA.,hex value: 0xffeeaa.
+Scientific notation: 1.2e-5.,scientific notation: 1.2e-5.
+Percentages like 99.9%.,percentages like 99.9 .
+Fractions such as 3/4 are common.,fractions such as 3/4 are common.
+Currency symbols ¥ £ ₩ ₹.,currency symbols .
+Emojis only 😂🔥💯.,emojis only .
+Text then emoji then text 👍 ok 👍.,text then emoji then text ok .
+Random symbols @#$%^&*.,random symbols # .
+File path C:\Users\Test\file.txt.,file path c: users test file.txt.
+Unix path /usr/local/bin.,unix path /usr/local/bin.
+"{""key"":""value""}","""key"":""value"""
+<tag>value</tag>,<tag>value</tag>
+SELECT * FROM table;,select from table;
+"print(""hello"")","print(""hello"")"
+std::vector<int>,std::vector<int>
+() => {},() >
+^[a-z]+$,a-z
+[INFO] Process started.,info process started.
+Warning!!! Disk almost full.,warning! disk almost full.
+ERROR: Null pointer exception.,error: null pointer exception.
+DEBUG mode enabled.,debug mode enabled.
+Casual slang bruh that’s wild.,casual slang bruh that's wild.
+Internet slang idk tbh imo.,internet slang idk tbh imo.
+Abbreviations like etc. and e.g.,abbreviations like etc. and e.g.
+Academic tone: The results indicate significance.,academic tone: the results indicate significance.
+Legal tone: Hereinafter referred to as the Party.,legal tone: hereinafter referred to as the party.
+Marketing tone: Limited time offer!!!,marketing tone: limited time offer!
+Are you serious?,are you serious?
+I am serious.,i am serious.
+Do it now.,do it now.
+"If it rains, we stay in.","if it rains, we stay in."
+The cake was eaten.,the cake was eaten.
+She ate the cake.,she ate the cake.
+"Rhetorical question, right?","rhetorical question, right?"
+Sarcasm sure that worked perfectly.,sarcasm sure that worked perfectly.
+wow great job 🙄,wow great job
+thsi is wrnog.,thsi is wrnog.
+duck instead of fuck.,duck instead of fuck.
+word word word test.,word word word test.
+HTTPS://EXAMPLE.COM,<URL>
+https://site.com?a=1&b=2,<URL>
+@user123,user123
+#covid19,covid19
+#ThisIsATest,thisisatest
+#this_is_test,this_is_test
+hi😂there😂friend,hi there friend
+😂😂😂😂😂😂😂,
+h e l l o,h e l l o
+h  e   l    l     o,h e l l o
+sooooo good,sooooo good
+ALL CAPS ANGER MODE,all caps anger mode
+lowercase whisper mode,lowercase whisper mode
+MiXeD CAPS for EmPhAsIs,mixed caps for emphasis
+. . .,. . .
+“He said no.”,"""he said no."""
+— she paused — then spoke.,- she paused - then spoke.
+14:30 vs 2:30 PM,14:30 vs 2:30 pm
+"Jan 19, 2026","jan 19, 2026"
+2026-01-19T21:00:00Z,2026-01-19t21:00:00z
+true false TRUE FALSE,true false true false
+null None NaN,null none nan
+(a+b)^2 = a^2+2ab+b^2,(a b) 2 a 2 2ab b 2
+https://x.com/%20test,<URL>
+👍🏽👍🏻👍🏿,
+🧑‍💻👩‍💻👨‍💻,
+← ↑ → ↓,
+x² and H₂O,x² and h₂o
+✔️ ❌,
+★★★★☆,
+- item one,- item one
+1) first,1) first
+a > b < c,a > b < c
+~50 items,50 items
+1–10 inclusive,1-10 inclusive
+%,
+$,
++-=*/,- /
+lol u good?,lol u good?
+"Text with newline at end.
+",text with newline at end.
+Sentence with trailing emoji 😂,sentence with trailing emoji
+😎 cool.,cool.
+#StartHere now.,starthere now.
+@admin please read.,admin please read.
+&amp; &lt; &gt;,amp; lt; gt;
+✨,
+asdfghjkl,asdfghjkl
+lksjdflksjdf,lksjdflksjdf
+123abc!!!,123abc!
+-/-/- test,-/-/- test
+(test [inner {deep}]),(test inner deep )
+"""she said 'no'""","""she said 'no'"""
+y’all shouldn’t’ve done that.,y'all shouldn't've done that.
+don’t won’t can’t,don't won't can't
+Sentence ending with space . ,sentence ending with space .
+😂 #fun,fun
+@me https://t.co/x,me <URL>
+@u #tag 😂!!!,u tag !
+?!?!!,?!?!
+⇒ ⇐ ⇔,
+∑ ∫ √,
+$100 CAD,100 cad
+5kg 10m 3L,5kg 10m 3l
+98.6°F,98.6 f
+🇺🇸 🇯🇵 🇫🇷,
+🙂🙂🙂,
+ok.,ok.
+a,a
+.,.
+Lorem ipsum dolor sit amet.,lorem ipsum dolor sit amet.
+TBD,tbd
+f*** this,f this
+[REDACTED],redacted
+user_name_01,user_name_01
+./data/input.txt,./data/input.txt
+👨‍👩‍👧‍👦,
+☺︎,
+x≠y,x y
+a | b | c,a b c
+~home,home
+^_^,_
+\n \t,n t
+[21:00] hello,21:00 hello
+[text](url),text (url)
+50% off,50 off
+1st 2nd 3rd,1st 2nd 3rd
+twenty-one 21,twenty-one 21
+😂 + 1 = 2,1 2
+Final test sentence done.,final test sentence done.

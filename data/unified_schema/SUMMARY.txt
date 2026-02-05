@@ -1,0 +1,61 @@
+coaid
+[
+    ('success', 829), 
+    ('robots_blocked', 449), 
+    ('http_404', 157), 
+    ('http_403', 36), 
+    ('error', 19), 
+    ('200_no_parse', 4)
+]
+true: 5022 rows
+false: 953 rows
+mixed: 0 rows
+
+fakehealth
+[
+    ('success', 32), 
+    ('http_400', 18), 
+    ('error', 2), 
+    ('http_404', 2), 
+    ('200_no_parse', 1), 
+    ('http_500', 1)
+]
+true: 738 rows
+false: 738 rows
+mixed: 723 rows
+
+fakenewsnet
+[
+    ('success', 16384), 
+    ('http_404', 2535), 
+    ('error', 1509), 
+    ('http_403', 834), 
+    ('200_no_parse', 484), 
+    ('no_url', 330), 
+    ('robots_blocked', 269), 
+    ('timeout', 215), 
+    ('http_202', 145), 
+    ('http_500', 143), 
+    ('http_410', 88), 
+    ('http_502', 64)
+]
+true: 17439 rows
+false: 5755 rows
+mixed: 0 rows
+
+hover
+true: 13023 rows
+false: 9148 rows
+mixed: 4000 rows
+
+liar
+true: 2053 rows
+false: 3554 rows
+mixed: 7184 rows
+
+Total: 70,330 rows:
+coaid: 5,975
+fakehealth: 2,199
+fakenewsnet: 23,194
+hover: 26,171
+liar: 12,791
