@@ -1,0 +1,166 @@
+# 6_MMR_selection/process_pseudo.txt
+# Based on Maximal Marginal Relevance (MMR) as described in the Medium post and the
+# original MMR paper (Carbonell & Goldstein, 1998).
+#
+# Goal: select a diverse subset of size N from candidate pool of size M:
+#   maximize relevance to the claim while minimizing redundancy vs already-selected chunks.
+#
+# MMR selection rule (common form):
+#   pick d in (R \ S) that maximizes:
+#     λ * sim(d, Q) - (1-λ) * max_{s in S} sim(d, s)
+# where:
+#   Q = query (we use normalized_claim embedding as Q),
+#   R = candidate pool items,
+#   S = selected items,
+#   sim = cosine similarity on embeddings.
+
+# Assumptions (implementation details ignored):
+#   embed(text: string, model: string) -> vector<float>
+#   cosine(a,b) -> float
+#
+#   embedding_cache_get(key: string) -> optional<vector<float>>
+#   embedding_cache_set(key: string, vec: vector<float>, ttl_s: int) -> void
+#
+#   index_candidates_by_chunk_id(rag_candidates.items) -> map<chunk_id, item>
+#
+# Notes on efficiency:
+#   - This stage computes embeddings for ALL candidate chunks for MMR.
+#   - To prevent Stage 7 from re-embedding the same texts, we populate an embedding cache
+#     keyed by chunk_id (and embed_model). We do NOT serialize vectors into the pipeline object.
+
+INPUT:
+  {
+    request_id,
+    claim_id,
+    user_claim,
+    normalized_claim,
+    roberta,
+    routing: {
+      rag: {
+        candidate_pool_size_m (M),
+        mmr_top_n (N),
+        mmr_lambda (λ)
+      }
+    },
+    rag_candidates: { items: [ {chunk_id, text, score, doc{doc_id,url,...}, ...} ] },
+    meta: {
+      # optional efficiency knobs (recommended)
+      embed_model?,
+      embedding_cache_enabled?,
+      embedding_cache_namespace?,
+      embedding_cache_ttl_s?,
+      ...
+    }
+  }
+
+CONSTANTS (tunable defaults if meta.* not provided):
+  DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"   # example id
+  DEFAULT_EMBED_CACHE_ENABLED = true
+  DEFAULT_EMBED_CACHE_NAMESPACE = "emb"
+  DEFAULT_EMBED_CACHE_TTL_S = 0         # 0 => backend default / no-expiry
+  EPS = 1e-9
+
+HELPERS:
+  cache_key(embed_model, chunk_id):
+    ns = (meta.embedding_cache_namespace OR DEFAULT_EMBED_CACHE_NAMESPACE)
+    return ns + ":" + embed_model + ":" + chunk_id
+
+PROCESS:
+1) Read parameters
+    M = routing.rag.candidate_pool_size_m
+    N = routing.rag.mmr_top_n
+    λ = routing.rag.mmr_lambda
+
+    embed_model = meta.embed_model OR DEFAULT_EMBED_MODEL
+    cache_enabled = (meta.embedding_cache_enabled if present else DEFAULT_EMBED_CACHE_ENABLED)
+    cache_ttl_s = meta.embedding_cache_ttl_s OR DEFAULT_EMBED_CACHE_TTL_S
+
+2) Precompute / load claim embedding (Q)
+   q_key = cache_key(embed_model, "claim:" + claim_id)
+   IF cache_enabled:
+       q_vec = embedding_cache_get(q_key)
+   IF q_vec missing:
+       q_vec = embed(normalized_claim, embed_model)
+       IF cache_enabled:
+           embedding_cache_set(q_key, q_vec, cache_ttl_s)
+
+3) Precompute / load candidate embeddings
+   # Build local lookup (do not serialize vectors into output)
+   cand_vecs = map<chunk_id, vector<float>>()
+
+   FOR each item in rag_candidates.items:
+       cid = item.chunk_id
+       k = cache_key(embed_model, cid)
+
+       IF cache_enabled:
+           v = embedding_cache_get(k)
+       IF v missing:
+           v = embed(item.text, embed_model)
+           IF cache_enabled:
+               embedding_cache_set(k, v, cache_ttl_s)
+
+       cand_vecs[cid] = v
+
+4) MMR selection loop
+   selected = []
+   selected_ids = set()
+
+   # Precompute relevance sims to query (cosine to Q) for speed
+   rel_sim = map<chunk_id, float>()
+   FOR each item in rag_candidates.items:
+       cid = item.chunk_id
+       rel_sim[cid] = cosine(cand_vecs[cid], q_vec)
+
+   FOR step in 1..N:
+       best = null
+       best_score = -inf
+
+       FOR each item in rag_candidates.items:
+           cid = item.chunk_id
+           IF cid in selected_ids: continue
+
+           # redundancy term
+           IF len(selected) == 0:
+               red = 0.0
+           ELSE:
+               red = max( cosine(cand_vecs[cid], cand_vecs[sid]) for sid in selected_ids )
+
+           mmr = λ * rel_sim[cid] - (1-λ) * red
+
+           # Deterministic argmax with tie-breakers:
+           #   primary: mmr DESC
+           #   tie-break 1: original retrieval score (item.score) DESC
+           #   tie-break 2: chunk_id ASC
+           IF (mmr > best_score + EPS):
+               best = item; best_score = mmr
+           ELSE IF (abs(mmr - best_score) <= EPS) AND best not null:
+               IF (item.score > best.score + EPS):
+                   best = item
+               ELSE IF (abs(item.score - best.score) <= EPS) AND (cid < best.chunk_id):
+                   best = item
+
+       IF best is null:
+           break
+
+       selected.append(best)
+       selected_ids.add(best.chunk_id)
+
+5) Build mmr_selected output
+  mmr_selected = {
+    top_n: N,
+    lambda: λ,
+    similarity: { metric: "cosine", embed_model: embed_model },
+    items: [
+      {
+        chunk_id,
+        doc_id: item.doc.doc_id,
+        text: item.text,
+        score: item.score,
+        doc: item.doc
+      } for item in selected
+    ]
+  }
+
+6) Output (passthrough + mmr_selected)
+   OUTPUT = INPUT plus "mmr_selected" field
+   RETURN OUTPUT

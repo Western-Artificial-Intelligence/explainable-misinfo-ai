@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/7_relevance_gate/input_schema.json",
+  "title": "7_Relevance_gate - Input Schema",
+  "description": "Stage 7 consumes the exact output of Stage 6 (MMR selection).",
+  "allOf": [
+    { "$ref": "../6_MMR_selection/output_schema.json" }
+  ]
+}

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/9_llm_summarization/output_schema.json",
+  "title": "9_LLM_summarization - Output Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "claim_id",
+    "user_claim",
+    "normalized_claim",
+    "roberta",
+    "evidence_topk",
+    "shap_explainability",
+    "summary",
+    "meta"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "user_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "normalized_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "roberta": {
+      "$ref": "../8_Explainability/output_schema.json#/properties/roberta"
+    },
+    "routing": {
+      "$ref": "../8_Explainability/output_schema.json#/properties/routing"
+    },
+    "query_plan": {
+      "$ref": "../8_Explainability/output_schema.json#/properties/query_plan"
+    },
+    "evidence_topk": {
+      "$ref": "../8_Explainability/output_schema.json#/properties/evidence_topk"
+    },
+    "shap_explainability": {
+      "$ref": "../8_Explainability/output_schema.json#/properties/shap_explainability"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "confidence",
+        "short",
+        "bullets",
+        "citations",
+        "explainability"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "false",
+            "mixed",
+            "true"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "short": {
+          "type": "string",
+          "minLength": 1,
+          "description": "1-2 sentence user-facing summary."
+        },
+        "bullets": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Key supporting points (short)."
+        },
+        "citations": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "doc_id",
+              "source",
+              "title",
+              "url"
+            ],
+            "properties": {
+              "doc_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "published_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "description": "Unique sources cited in the summary (from evidence_topk)."
+        },
+        "explainability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "top_positive_tokens",
+            "top_negative_tokens"
+          ],
+          "properties": {
+            "top_positive_tokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Human-readable tokens that pushed toward the predicted class."
+            },
+            "top_negative_tokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Human-readable tokens that pushed away from the predicted class."
+            }
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "stage_latencies_ms": {
+          "type": "object",
+          "description": "Per-stage latency in milliseconds, keyed by stage name.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "total_latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total end-to-end latency in milliseconds (sum of stage latencies plus overhead)."
+        },
+        "stage_errors": {
+          "type": "array",
+          "description": "Non-fatal stage errors encountered during processing (pipeline continued).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "minLength": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "details": {
+                "type": "object",
+                "description": "Optional structured details for debugging.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
