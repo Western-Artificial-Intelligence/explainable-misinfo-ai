@@ -1,9 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://truthlens.ai/schemas/9_llm_summarization/input_schema.json",
-  "title": "9_LLM_summarization - Input Schema",
-  "description": "Stage 9 consumes the exact output of Stage 8 (explainability).",
-  "allOf": [
-    { "$ref": "../8_Explainability/output_schema.json" }
-  ]
-}

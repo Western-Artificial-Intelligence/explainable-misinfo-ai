@@ -1,9 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://truthlens.ai/schemas/10_output/input_schema.json",
-  "title": "10_Output - Input Schema",
-  "description": "Stage 10 consumes the exact output of Stage 9 (LLM summarization).",
-  "allOf": [
-    { "$ref": "../9_LLM_summarization/output_schema.json" }
-  ]
-}

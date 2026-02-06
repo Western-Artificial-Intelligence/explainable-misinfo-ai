@@ -1,9 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://truthlens.ai/schemas/8_explainability_shap/input_schema.json",
-  "title": "8_Explainability_SHAP - Input Schema",
-  "description": "Stage 8 consumes the exact output of Stage 7 (relevance gate).",
-  "allOf": [
-    { "$ref": "../7_Light_relevance_gate/output_schema.json" }
-  ]
-}
