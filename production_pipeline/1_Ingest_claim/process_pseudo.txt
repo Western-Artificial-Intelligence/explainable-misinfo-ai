@@ -1,0 +1,52 @@
+# 1_Ingest_claim/process_pseudo.txt
+
+# NOTE: request_id and claim_id are assigned by the server BEFORE this step runs.
+
+INPUT: { user_claim }
+SERVER CONTEXT (already set): request_id, claim_id
+
+1) Validate input
+   - ensure user_claim exists and is non-empty after trimming
+   - if invalid: return error INVALID_CLAIM_TEXT
+
+2) Normalize claim text
+   - raw = user_claim
+   - normalized = unicode_normalize_NFKC(raw)
+   - normalized = strip(normalized)
+   - normalized = collapse_internal_whitespace(normalized)
+   - (optional) remove zero-width chars / normalize newlines
+
+3) Build warnings (non-fatal)
+   - if raw != normalized: add warning TEXT_NORMALIZED
+   - if normalized is extremely long (chars): add warning VERY_LONG_CLAIM
+   - do NOT truncate here (token truncation happens at tokenization step)
+
+4) Emit output object
+   OUTPUT = {
+     request_id,
+     claim_id,
+     user_claim: raw,
+     normalized_claim: normalized,
+     meta: {
+       received_at: now_iso8601(),
+       version: PIPELINE_VERSION,
+       warnings?: [...]
+     }
+   }
+
+RETURN OUTPUT
+
+----------------------------------------
+DETERMINISM / TIE-BREAKING (PROD)
+----------------------------------------
+Goal: avoid flaky outputs when sorting or taking argmax over floats.
+
+Definitions:
+  EPS = 1e-9  (treat |a-b| <= EPS as a tie)
+
+Rules:
+  1) Never rely on dict/map iteration order for ranking.
+  2) Any argmax must define a deterministic tie-break order.
+  3) Any sort must define secondary/tertiary keys (stable IDs).
+
+

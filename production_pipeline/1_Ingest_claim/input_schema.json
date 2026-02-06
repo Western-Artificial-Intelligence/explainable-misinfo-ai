@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/1_ingest_claim/input_schema.json",
+  "title": "1_Ingest_claim - Input Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_claim"],
+  "properties": {
+    "user_claim": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw user-provided claim text."
+    }
+  }
+}
