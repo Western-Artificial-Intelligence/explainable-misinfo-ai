@@ -1,3 +1,0 @@
-run code
-python -m LLM_explainable.cli --claim "Adrienne Bailon is an accountant."
-

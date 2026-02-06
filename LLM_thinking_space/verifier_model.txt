@@ -1,7 +1,0 @@
-process:
-read 
-→ sanitize/unify 
-→ filter/dedup 
-→ split 
-→ tokenize (batched, cached) 
-→ train
