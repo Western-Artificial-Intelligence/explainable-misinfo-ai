@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/1_ingest_claim/output_schema.json",
+  "title": "1_Ingest_claim - Output Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "claim_id",
+    "user_claim",
+    "normalized_claim",
+    "meta"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Server-assigned request identifier for tracing."
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Server-assigned stable identifier for this claim."
+    },
+    "user_claim": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw user-provided claim text."
+    },
+    "normalized_claim": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Normalized claim text (unicode-normalized, trimmed, whitespace-collapsed)."
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "received_at",
+        "version"
+      ],
+      "properties": {
+        "received_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when claim was ingested."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pipeline schema/version for traceability."
+        },
+        "warnings": {
+          "type": "array",
+          "description": "Non-fatal ingestion warnings.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "stage_latencies_ms": {
+          "type": "object",
+          "description": "Per-stage latency in milliseconds, keyed by stage name.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "total_latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total end-to-end latency in milliseconds (sum of stage latencies plus overhead)."
+        },
+        "stage_errors": {
+          "type": "array",
+          "description": "Non-fatal stage errors encountered during processing (pipeline continued).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "minLength": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "details": {
+                "type": "object",
+                "description": "Optional structured details for debugging.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

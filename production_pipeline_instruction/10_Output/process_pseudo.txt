@@ -1,0 +1,117 @@
+# 10_Output/process_pseudo.txt
+# Goal: package Step 9 outputs into a clean final response for the frontend:
+#   - "public": minimal user-facing fields
+#   - optional "debug": internal diagnostics (can be gated by server flag)
+
+INPUT:
+  {
+    request_id,
+    claim_id,
+    user_claim,
+    normalized_claim,
+    roberta,
+    routing?,
+    query_plan?,
+    evidence_topk,
+    shap_explainability,
+    summary,
+    meta
+  }
+
+CONSTANTS:
+  INCLUDE_DEBUG_DEFAULT = false
+
+HELPERS (assumed):
+  now_iso() -> string
+  unique_by_url(citations) -> list
+  safe_get_total_latency(meta) -> int|null
+
+PROCESS:
+1) Extract user-facing content from Step 9 summary
+   verdict = summary.verdict
+   confidence = summary.confidence
+   short_summary = summary.short
+   bullets = summary.bullets
+   citations = summary.citations
+   explain_tokens = summary.explainability
+
+2) Normalize citations for UI (dedupe, stable ordering)
+   citations_ui = []
+   seen = set()
+
+   FOR each c in citations:
+       key = c.url
+       IF key in seen: continue
+       seen.add(key)
+
+       citations_ui.append({
+         source: c.source,
+         title: c.title,
+         url: c.url,
+         published_at: c.published_at?   # optional
+       })
+
+3) Build "public" block
+   public = {
+     claim: user_claim,
+     verdict: verdict,
+     confidence: confidence,
+     summary: short_summary,
+     bullets: bullets,
+     citations: citations_ui,
+     explainability: {
+       top_positive_tokens: explain_tokens.top_positive_tokens,
+       top_negative_tokens: explain_tokens.top_negative_tokens
+     }
+   }
+
+4) Optionally build "debug" block
+   # This is controlled by server config or request flags (not in schema here).
+   include_debug = INCLUDE_DEBUG_DEFAULT
+
+   IF include_debug:
+       debug = {
+         normalized_claim: normalized_claim,
+         roberta: roberta,
+         evidence_topk: evidence_topk,
+         shap_explainability: shap_explainability,
+         routing: routing?,
+         query_plan: query_plan?
+       }
+   ELSE:
+       debug = null  # omit field in output
+
+5) Build meta block
+   output_meta = {
+     version: meta.version,
+     completed_at: now_iso(),
+     latency_ms_total: safe_get_total_latency(meta)   # optional if you aggregate per-step latencies
+   }
+
+6) Emit final output
+   OUTPUT = {
+     request_id: request_id,
+     claim_id: claim_id,
+     public: public,
+     meta: output_meta
+   }
+
+   IF include_debug:
+       OUTPUT.debug = debug
+
+RETURN OUTPUT
+
+----------------------------------------
+DETERMINISM / TIE-BREAKING (PROD)
+----------------------------------------
+Goal: avoid flaky outputs when sorting or taking argmax over floats.
+
+Definitions:
+  EPS = 1e-9  (treat |a-b| <= EPS as a tie)
+
+Rules:
+  1) Never rely on dict/map iteration order for ranking.
+  2) Any argmax must define a deterministic tie-break order.
+  3) Any sort must define secondary/tertiary keys (stable IDs).
+
+

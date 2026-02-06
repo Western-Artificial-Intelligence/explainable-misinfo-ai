@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/10_output/output_schema.json",
+  "title": "10_Output - Output Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "claim_id",
+    "public",
+    "meta"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "public": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim",
+        "verdict",
+        "confidence",
+        "summary",
+        "bullets",
+        "citations",
+        "explainability"
+      ],
+      "properties": {
+        "claim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "false",
+            "mixed",
+            "true"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bullets": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "citations": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "title",
+              "url"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "published_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "explainability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "top_positive_tokens",
+            "top_negative_tokens"
+          ],
+          "properties": {
+            "top_positive_tokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "top_negative_tokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "debug": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional diagnostics for internal use or advanced UI modes.",
+      "required": [
+        "normalized_claim",
+        "roberta",
+        "evidence_topk"
+      ],
+      "properties": {
+        "normalized_claim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "roberta": {
+          "$ref": "../9_LLM_summarization/output_schema.json#/properties/roberta"
+        },
+        "evidence_topk": {
+          "$ref": "../9_LLM_summarization/output_schema.json#/properties/evidence_topk"
+        },
+        "shap_explainability": {
+          "$ref": "../9_LLM_summarization/output_schema.json#/properties/shap_explainability"
+        },
+        "routing": {
+          "$ref": "../9_LLM_summarization/output_schema.json#/properties/routing"
+        },
+        "query_plan": {
+          "$ref": "../9_LLM_summarization/output_schema.json#/properties/query_plan"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "completed_at"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "latency_ms_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage_latencies_ms": {
+          "type": "object",
+          "description": "Per-stage latency in milliseconds, keyed by stage name.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "total_latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total end-to-end latency in milliseconds (sum of stage latencies plus overhead)."
+        },
+        "stage_errors": {
+          "type": "array",
+          "description": "Non-fatal stage errors encountered during processing (pipeline continued).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "minLength": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "details": {
+                "type": "object",
+                "description": "Optional structured details for debugging.",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/7_relevance_gate/output_schema.json",
+  "title": "7_Relevance_gate - Output Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "claim_id",
+    "user_claim",
+    "normalized_claim",
+    "roberta",
+    "routing",
+    "query_plan",
+    "rag_candidates",
+    "mmr_selected",
+    "evidence_topk",
+    "meta"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claim_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "user_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "normalized_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "roberta": { 
+      "$ref": "../6_MMR_selection/output_schema.json#/properties/roberta" 
+    },
+    "routing": { 
+      "$ref": "../6_MMR_selection/output_schema.json#/properties/routing" 
+    },
+    "query_plan": { 
+      "$ref": "../6_MMR_selection/output_schema.json#/properties/query_plan" 
+    },
+    "rag_candidates": { 
+      "$ref": "../6_MMR_selection/output_schema.json#/properties/rag_candidates" 
+    },
+    "mmr_selected": { 
+      "$ref": "../6_MMR_selection/output_schema.json#/properties/mmr_selected" 
+    },
+    "evidence_topk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "top_k",
+        "min_relevance",
+        "method",
+        "items"
+      ],
+      "properties": {
+        "top_k": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Target K from routing.final_top_k."
+        },
+        "min_relevance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Relevance threshold T in [0,1]. Defined as cosine similarity between L2-normalized embeddings: T <= cosine(embed(claim), embed(chunk)), using the same embedding model for both."
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "cosine_threshold",
+            "cross_encoder_threshold"
+          ],
+          "description": "Which lightweight gate was used."
+        },
+        "items": {
+          "type": "array",
+          "minItems": 0,
+          "description": "Final evidence items (size <= top_k).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rank",
+              "chunk_id",
+              "doc_id",
+              "text",
+              "relevance_score",
+              "doc"
+            ],
+            "properties": {
+              "rank": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chunk_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "doc_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relevance_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "doc": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "title",
+                  "url"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "url": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "published_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "stage_latencies_ms": {
+          "type": "object",
+          "description": "Per-stage latency in milliseconds, keyed by stage name.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "total_latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total end-to-end latency in milliseconds (sum of stage latencies plus overhead)."
+        },
+        "stage_errors": {
+          "type": "array",
+          "description": "Non-fatal stage errors encountered during processing (pipeline continued).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "stage": {
+                "type": "string",
+                "minLength": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "details": {
+                "type": "object",
+                "description": "Optional structured details for debugging.",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "embed_model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Embedding model identifier used for similarity computations (must be consistent across stages)."
+        },
+        "embedding_cache_enabled": {
+          "type": "boolean",
+          "description": "If true, use an embedding cache keyed by chunk_id (or derived cache key) to avoid re-embedding."
+        },
+        "embedding_cache_namespace": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Namespace/prefix for embedding cache keys (e.g., 'emb')."
+        },
+        "embedding_cache_ttl_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional embedding cache TTL in seconds (0 means no expiry / backend default)."
+        }
+      }
+    }
+  }
+}

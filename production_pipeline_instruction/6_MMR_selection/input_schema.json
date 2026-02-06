@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://truthlens.ai/schemas/6_mmr_selection/input_schema.json",
+  "title": "6_MMR_selection - Input Schema",
+  "description": "Stage 6 consumes the exact output of Stage 5 (RAG retrieval).",
+  "allOf": [
+    { "$ref": "../5_RAG/output_schema.json" }
+  ]
+}

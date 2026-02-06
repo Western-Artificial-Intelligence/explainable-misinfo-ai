@@ -1,0 +1,92 @@
+# 3_Routing_policy/process_pseudo.txt
+# Goal: choose retrieval + processing knobs (M, N, K, thresholds, query expansion)
+# based on RoBERTa confidence and simple flags.
+
+INPUT:
+  {
+    request_id,
+    claim_id,
+    user_claim,
+    normalized_claim,
+    roberta: { label: { probs, class_name }, confidence, tokenization: { truncated, input_tokens }, model: {...} },
+    meta: { received_at, version, warnings?, latency_ms? }
+  }
+
+CONSTANTS (tunable):
+  POLICY_NAME = "routing_policy"
+  POLICY_VERSION = "v1"
+
+  # confidence thresholds
+  HI_CONF = 0.80
+  LO_CONF = 0.55
+
+  # default RAG knobs
+  STANDARD = { M: 50,  N: 12, K: 6,  MIN_REL: 0.25, QEXP: true,  WEB: true }
+  EXPANDED = { M: 100, N: 20, K: 10, MIN_REL: 0.20, QEXP: true,  WEB: true }
+  CONSERV  = { M: 80,  N: 16, K: 8,  MIN_REL: 0.30, QEXP: false, WEB: true }
+
+PROCESS:
+1) Derive routing tier
+   - conf = roberta.confidence
+   - label = roberta.label.class_name
+   - is_truncated = roberta.tokenization.truncated
+
+   IF conf < LO_CONF:
+       tier = "expanded"
+       knobs = EXPANDED
+   ELSE IF conf >= HI_CONF AND is_truncated == false:
+       tier = "standard"
+       knobs = STANDARD
+   ELSE:
+       tier = "conservative"
+       knobs = CONSERV
+
+   # Optional label-based tweaks
+   IF label == "false":
+       # help find debunks / corrections
+       knobs.QEXP = true
+   IF label == "true" AND conf >= HI_CONF:
+       # reduce search breadth slightly (optional)
+       knobs.M = max(30, knobs.M - 20)
+
+2) Safety clamps / invariants
+   - enforce 1 <= K <= N <= M
+       - if violated: clamp to satisfy K<=N<=M and add meta.warnings += ["ROUTING_KNOBS_CLAMPED"]
+   - enforce 0 <= MIN_REL <= 1
+       - if violated: clamp to [0,1] and add meta.warnings += ["ROUTING_MIN_REL_CLAMPED"]
+
+3) Build routing block
+   routing = {
+     policy_name: POLICY_NAME,
+     policy_version: POLICY_VERSION,
+     tier: tier,
+     rag: {
+       candidate_pool_size_m: knobs.M,
+       mmr_top_n: knobs.N,
+       final_top_k: knobs.K,
+       min_relevance: knobs.MIN_REL,
+       use_query_expansion: knobs.QEXP,
+       allow_web_search: knobs.WEB
+     }
+   }
+
+4) Emit output (passthrough + routing)
+   OUTPUT = INPUT plus "routing" field
+   (meta may be passed through unchanged; later steps can add latency_ms for routing if desired)
+
+RETURN OUTPUT
+
+----------------------------------------
+DETERMINISM / TIE-BREAKING (PROD)
+----------------------------------------
+Goal: avoid flaky outputs when sorting or taking argmax over floats.
+
+Definitions:
+  EPS = 1e-9  (treat |a-b| <= EPS as a tie)
+
+Rules:
+  1) Never rely on dict/map iteration order for ranking.
+  2) Any argmax must define a deterministic tie-break order.
+  3) Any sort must define secondary/tertiary keys (stable IDs).
+
+
