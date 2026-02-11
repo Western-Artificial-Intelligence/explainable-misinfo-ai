@@ -1,0 +1,28 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "input_text": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "label_3way": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "label_bin": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "source_id": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "split": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
