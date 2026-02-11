@@ -1,0 +1,15 @@
+# ==========================================
+# Minimal dependencies for baseline training
+# ==========================================
+
+transformers<5
+datasets
+torch==2.2.2
+numpy>=1.24,<2
+scikit-learn
+pyyaml
+tqdm
+
+# Optional dependency for LoRA (PEFT)
+# If not installed, LoRA adapters will not be applied, but training still works
+peft
