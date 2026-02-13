@@ -1,4 +1,3 @@
-# ===== baseline_model/data_utils/tokenize.py =====
 from transformers import AutoTokenizer
 from typing import Any, Dict, List
 

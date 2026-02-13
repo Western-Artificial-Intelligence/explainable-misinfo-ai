@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 if __package__ is None or __package__ == "":
@@ -117,7 +118,7 @@ def train(config_path: str, run_name: str, resume_from: str = None):
                                                  r=lora_cfg.get("r", 8),
                                                  lora_alpha=lora_cfg.get("alpha", 16),
                                                  lora_dropout=lora_cfg.get("dropout", 0.05),
-                                                 target_modules=["query", "value"])
+                                                 target_modules=lora_cfg.get("target_modules", ["query", "value"]))
     # If tokenizer added tokens, resize embeddings
     try:
         model.encoder.resize_token_embeddings(len(tokenizer))
@@ -127,6 +128,9 @@ def train(config_path: str, run_name: str, resume_from: str = None):
 
     model.to(device)
 
+    # Seed
+    set_seed(int(config["training"]["seed"]))
+
     # Optimizer - only parameters that require grad (important for PEFT)
     lr = float(config["training"]["lr"])
     weight_decay = float(config["training"]["weight_decay"])
@@ -135,6 +139,19 @@ def train(config_path: str, run_name: str, resume_from: str = None):
         lr=lr,
         weight_decay=weight_decay,
     )
+
+    # Learning rate scheduler with warmup
+    epochs = int(config["training"]["epochs"])
+    total_steps = len(train_loader) * epochs
+    warmup_ratio = float(config["training"].get("warmup_ratio", 0.06))
+    warmup_steps = int(warmup_ratio * total_steps)
+
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            return current_step / max(1, warmup_steps)
+        return 1.0
+
+    scheduler = LambdaLR(optimizer, lr_lambda)
 
     start_epoch = 0
     best_metric = -1.0
@@ -149,7 +166,6 @@ def train(config_path: str, run_name: str, resume_from: str = None):
         print(f"[train] Resumed from {resume_from}, starting epoch {start_epoch}")
 
     # Training loop
-    epochs = int(config["training"]["epochs"])
     grad_accum_steps = int(config["training"].get("grad_accum_steps", 1))
     scaler = torch.cuda.amp.GradScaler() if isinstance(device, str) and device.startswith("cuda") else (torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None)
 
@@ -200,10 +216,17 @@ def train(config_path: str, run_name: str, resume_from: str = None):
             is_update_step = ((batch_idx + 1) % grad_accum_steps == 0) or (batch_idx + 1 == len(train_loader))
             if is_update_step:
                 if scaler is not None:
+                    scaler.unscale_(optimizer)
+                grad_clip_norm = float(config["training"].get("grad_clip_norm", 1.0))
+                torch.nn.utils.clip_grad_norm_(
+                    filter(lambda p: p.requires_grad, model.parameters()), max_norm=grad_clip_norm
+                )
+                if scaler is not None:
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
 
             # Progress bar update

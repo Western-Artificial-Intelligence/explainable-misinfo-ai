@@ -8,19 +8,22 @@ lora:
   r: 8
   alpha: 16
   dropout: 0.05
+  target_modules: ["query", "value"]
 
 training:
   batch_size: 16
   lr: 1e-4
   epochs: 2
   weight_decay: 0.01
+  warmup_ratio: 0.06
+  grad_clip_norm: 1.0
   seed: 42
   device: auto
   grad_accum_steps: 1
   save_every_epoch: true
 
 data:
-  dataset_path: ../data/merged_dataset   # relative to baseline_model/
+  dataset_path: ../../data/processed/final_datasets  # relative to baseline_model/configs/
   create_synthetic_if_missing: true
 
 output:
