@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import endpoint routers from other files (modular structure)
-from .routes import classify, health, ollama_blackboxes
+from .routes import classify, health, production
 
 load_dotenv()
 
@@ -29,7 +29,8 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router)
 app.include_router(classify.router)
-app.include_router(ollama_blackboxes.router, prefix="/api/ollama")
+app.include_router(production.router, prefix="/api")
+# app.include_router(ollama_blackboxes.router, prefix="/api/ollama")
 
 
 # simple endpoint to verify the server is running
