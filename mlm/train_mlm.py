@@ -141,6 +141,9 @@ def main():
         eval_steps=2000,
         save_steps=2000,
         save_total_limit=2,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="none"
     )
 
