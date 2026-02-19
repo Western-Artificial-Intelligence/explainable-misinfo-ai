@@ -1,5 +1,12 @@
 # Import FastAPI framework
 import os  # noqa: F401
+import sys
+from pathlib import Path
+
+# Ensure project root is on path for pipeline imports
+_project_root = Path(__file__).resolve().parents[1]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 # allows your Python app to read environment variables from a
 from dotenv import load_dotenv
