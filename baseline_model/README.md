@@ -1,7 +1,3 @@
-Here’s a clean, polished **README.md–ready** version with proper Markdown structure and clarity:
-
----
-
 # Baseline Misinformation Classification Training
 
 **RoBERTa + LoRA + Domain-Adversarial Learning**
