@@ -1,16 +1,13 @@
-# Import FastAPI framework
-import os  # noqa: F401
+import logging
 
-# allows your Python app to read environment variables from a
 from dotenv import load_dotenv
 from fastapi import FastAPI
-# Import CORS middleware to allow frontend requests from other origins
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import endpoint routers from other files (modular structure)
-from .routes import classify, health, production
+from .routes import classify, documents, health
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
@@ -26,14 +23,23 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all HTTP methods: GET, POST, PUT, DELETE...
     allow_headers=["*"],  # Allow all HTTP headers (like content-type, authorization)
 )
-# Include routers
 app.include_router(health.router)
 app.include_router(classify.router)
-app.include_router(production.router, prefix="/api")
-# app.include_router(ollama_blackboxes.router, prefix="/api/ollama")
+app.include_router(documents.router)
+
+# Production route is optional because it relies on extra dependencies.
+try:
+    from .routes import production
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api production routes because dependency is missing: %s. "
+        "Install optional deps to enable it.",
+        exc.name,
+    )
+else:
+    app.include_router(production.router, prefix="/api")
 
 
-# simple endpoint to verify the server is running
 @app.get("/")
 def root():
     return {"message": "TruthLens backend running!"}

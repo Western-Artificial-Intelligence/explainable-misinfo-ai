@@ -1,12 +1,14 @@
-import random
+import logging
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ..services.predictor import predict_text
 from ..utils.cache import add_to_cache, get_from_cache
 
 # Create router instance for this module
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # Define input and output data models
@@ -20,15 +22,29 @@ class Output(BaseModel):
     explanation: str
 
 
+class PredictOutput(BaseModel):
+    prediction: str
+    confidence: float
+    explanation: str
+
+
 def classify_logic(text: str) -> dict:
     """
-    Core classification logic (currently dummy).
-    Later, replace with real ML model inference.
+    Core classification logic.
+    Falls back to random outputs when no model is configured.
     """
-    label = random.choice(["factual", "mixed", "false"])
-    confidence = round(random.uniform(0.6, 0.98), 2)
-    explanation = f"This is a placeholder explanation for '{label}' classification."
-    return {"label": label, "confidence": confidence, "explanation": explanation}
+    return predict_text(text)
+
+
+def _to_predict_output(result: dict) -> dict:
+    label = str(result.get("label", "")).lower().strip()
+    real_labels = {"real", "true", "factual", "reliable"}
+    prediction = "REAL" if label in real_labels else "FAKE"
+    return {
+        "prediction": prediction,
+        "confidence": float(result.get("confidence", 0)),
+        "explanation": str(result.get("explanation", "")),
+    }
 
 
 # POST endpoint at /classify
@@ -44,6 +60,8 @@ def classify_text(payload: InputText):
     # Step 1: Check cache
     cached_result = get_from_cache(payload.text)
     if cached_result:
+        logger.info("INPUT: %r", payload.text)
+        logger.info("OUTPUT (cache): %s", cached_result)
         return cached_result
 
     # Step 2: Run dummy classification logic
@@ -53,4 +71,15 @@ def classify_text(payload: InputText):
     add_to_cache(payload.text, result)
 
     # Step 4: Return the result
+    logger.info("INPUT: %r", payload.text)
+    logger.info("OUTPUT: %s", result)
     return result
+
+
+@router.post("/predict", response_model=PredictOutput)
+def predict_text_endpoint(payload: InputText):
+    result = classify_logic(payload.text)
+    output = _to_predict_output(result)
+    logger.info("INPUT: %r", payload.text)
+    logger.info("PREDICT_OUTPUT: %s", output)
+    return output
