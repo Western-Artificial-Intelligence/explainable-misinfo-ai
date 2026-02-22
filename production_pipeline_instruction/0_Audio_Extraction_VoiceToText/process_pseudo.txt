@@ -1,0 +1,89 @@
+```plaintext
+# 0_Audio_Extraction_VoiceToText/process_pseudo.txt
+
+INPUT: { 
+  media_source,           # file_path, url, or bytes
+  media_type,             # 'video', 'audio', 'url'
+  language?,              # optional: language code (e.g., 'en')
+  model_size?             # optional: 'tiny', 'base', 'small', 'medium', 'large'
+}
+SERVER CONTEXT (already set): request_id, claim_id
+
+1) Validate input
+   - ensure media_source exists and is accessible
+   - validate media_type is one of: 'video', 'audio', 'url'
+   - if invalid: return error INVALID_MEDIA_SOURCE
+   - if file size > max_size: return error FILE_TOO_LARGE
+
+2) Download/Prepare media
+   - if media_type == 'url':
+     * use yt-dlp to download video
+     * extract audio to temporary file
+   - if media_type == 'video':
+     * use ffmpeg to extract audio
+   - if media_type == 'audio':
+     * use as-is
+
+3) Audio preprocessing
+   - normalize sample rate to 16kHz (Whisper requirement)
+   - chunk audio into segments (30s max per Whisper limit)
+   - normalize audio levels
+   - remove silence if needed
+
+4) Transcription
+   - load Whisper model (cached)
+   - for each audio chunk:
+     * transcribe with Whisper
+     * extract text, confidence, timing info
+   - combine chunks into full transcription
+   - handle speaker diarization if enabled
+
+5) Post-processing
+   - clean transcribed text
+   - structure output with timestamps
+   - attach confidence scores
+   - preserve original text for reference
+
+6) Emit output object
+   OUTPUT = {
+     request_id,
+     claim_id,
+     media_source: original_source,
+     transcription: {
+       full_text: "...",
+       segments: [
+         {
+           text: "...",
+           start_time: 0.5,
+           end_time: 5.2,
+           confidence: 0.95
+         }
+       ],
+       language_detected: "en",
+       duration_seconds: 120.5
+     },
+     meta: {
+       processed_at: now_iso8601(),
+       model_used: "whisper-base",
+       version: PIPELINE_VERSION
+     }
+   }
+
+RETURN OUTPUT
+
+----------------------------------------
+ERROR HANDLING
+----------------------------------------
+- INVALID_MEDIA_SOURCE: media not found or inaccessible
+- FILE_TOO_LARGE: media exceeds size limit
+- AUDIO_EXTRACTION_FAILED: ffmpeg or download failed
+- TRANSCRIPTION_FAILED: Whisper processing error
+- UNSUPPORTED_FORMAT: media format not supported
+
+----------------------------------------
+CACHING
+----------------------------------------
+- Cache Whisper model locally after first load
+- Cache downloaded videos temporarily (clean up after processing)
+- Consider caching transcriptions for identical media
+```

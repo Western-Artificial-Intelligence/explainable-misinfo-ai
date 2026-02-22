@@ -1,0 +1,84 @@
+{
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Unique request identifier (passed through)"
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Unique claim identifier (passed through)"
+    },
+    "media_source": {
+      "type": "string",
+      "description": "Original media source reference"
+    },
+    "transcription": {
+      "type": "object",
+      "properties": {
+        "full_text": {
+          "type": "string",
+          "description": "Complete transcribed text from media"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "Transcribed text segment"
+              },
+              "start_time": {
+                "type": "number",
+                "description": "Start time in seconds"
+              },
+              "end_time": {
+                "type": "number",
+                "description": "End time in seconds"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Confidence score of transcription"
+              }
+            },
+            "required": ["text", "start_time", "end_time", "confidence"]
+          },
+          "description": "Segments of transcription with timing info"
+        },
+        "language_detected": {
+          "type": "string",
+          "description": "Detected language code"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "description": "Total duration of media in seconds"
+        }
+      },
+      "required": ["full_text", "segments", "language_detected", "duration_seconds"]
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "processed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp"
+        },
+        "model_used": {
+          "type": "string",
+          "description": "Name and version of model used"
+        },
+        "version": {
+          "type": "string",
+          "description": "Pipeline version"
+        }
+      },
+      "required": ["processed_at", "model_used", "version"]
+    }
+  },
+  "required": ["request_id", "claim_id", "transcription", "meta"],
+  "additionalProperties": false
+}

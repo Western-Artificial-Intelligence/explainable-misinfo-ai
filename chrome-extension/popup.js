@@ -13,7 +13,13 @@ const analyzeDocumentBtn = document.getElementById("analyzeDocumentBtn");
 const documentStatus = document.getElementById("documentStatus");
 const documentResults = document.getElementById("documentResults");
 
+const startAudioBtn = document.getElementById("startAudioBtn");
+const stopAudioBtn = document.getElementById("stopAudioBtn");
+const audioStatus = document.getElementById("audioStatus");
+const transcriptionResult = document.getElementById("transcriptionResult");
+
 let overlaysEnabled = false;
+let audioCapturing = false;
 
 initPopup();
 
@@ -22,6 +28,17 @@ async function initPopup() {
   analyzePageBtn.addEventListener("click", onAnalyzePage);
   toggleOverlayBtn.addEventListener("click", onToggleOverlays);
   analyzeDocumentBtn.addEventListener("click", onAnalyzeDocument);
+  startAudioBtn.addEventListener("click", onStartAudioCapture);
+  stopAudioBtn.addEventListener("click", onStopAudioCapture);
+
+  // Listen for transcription results from content script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "TRANSCRIPTION_COMPLETE") {
+      renderTranscriptionResult(message.payload);
+    } else if (message.type === "TRANSCRIPTION_ERROR") {
+      renderTranscriptionError(message.payload?.error || "Unknown error");
+    }
+  });
 
   const tab = await getActiveTab();
   if (!tab?.id) {
@@ -471,6 +488,123 @@ async function extractZipEntry(zipBuffer, targetPath) {
   }
 
   return null;
+}
+
+// ============================================
+// Audio Capture & Transcription Functions
+// ============================================
+
+async function onStartAudioCapture() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderTranscriptionError("Could not access active tab.");
+    return;
+  }
+
+  audioStatus.textContent = "Starting audio capture...";
+  setBusy(startAudioBtn, true, "Starting...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "START_AUDIO_CAPTURE" },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to start audio capture");
+    }
+
+    audioCapturing = true;
+    audioStatus.textContent = "🔴 Recording audio from video...";
+    startAudioBtn.classList.add("tlx-hidden");
+    stopAudioBtn.classList.remove("tlx-hidden");
+    clearTranscriptionResult();
+
+  } catch (error) {
+    audioStatus.textContent = `Error: ${error.message}`;
+    setBusy(startAudioBtn, false, "Start Audio Capture");
+  }
+}
+
+async function onStopAudioCapture() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderTranscriptionError("Could not access active tab.");
+    return;
+  }
+
+  audioStatus.textContent = "Stopping audio capture and sending for transcription...";
+  setBusy(stopAudioBtn, true, "Processing...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "STOP_AUDIO_CAPTURE" },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to stop audio capture");
+    }
+
+    audioCapturing = false;
+    audioStatus.textContent = "Transcribing audio... This may take a moment.";
+
+  } catch (error) {
+    audioStatus.textContent = `Error: ${error.message}`;
+    audioCapturing = false;
+    stopAudioBtn.classList.add("tlx-hidden");
+    startAudioBtn.classList.remove("tlx-hidden");
+    setBusy(stopAudioBtn, false, "Stop & Transcribe");
+  }
+}
+
+function renderTranscriptionResult(result) {
+  stopAudioBtn.classList.add("tlx-hidden");
+  startAudioBtn.classList.remove("tlx-hidden");
+  setBusy(stopAudioBtn, false, "Stop & Transcribe");
+
+  if (!result?.transcription?.full_text) {
+    audioStatus.textContent = "✅ Transcription complete, but no text was detected.";
+    return;
+  }
+
+  audioStatus.textContent = "✅ Transcription complete!";
+  
+  const transcribedText = result.transcription.full_text;
+  const duration = (result.transcription.duration_seconds || 0).toFixed(1);
+  const language = result.transcription.language_detected || "unknown";
+  const segmentCount = (result.transcription.segments || []).length;
+
+  const html = `
+    <div class="tlx-result-header">
+      <strong>Transcribed Text</strong>
+      <small>${duration}s • ${language}</small>
+    </div>
+    <div class="tlx-transcription-text">${escapeHtml(transcribedText)}</div>
+    <div class="tlx-result-meta">
+      <small>Segments: ${segmentCount} | Duration: ${duration}s</small>
+    </div>
+  `;
+
+  transcriptionResult.innerHTML = html;
+  transcriptionResult.classList.remove("tlx-hidden");
+}
+
+function renderTranscriptionError(error) {
+  stopAudioBtn.classList.add("tlx-hidden");
+  startAudioBtn.classList.remove("tlx-hidden");
+  setBusy(stopAudioBtn, false, "Stop & Transcribe");
+
+  audioStatus.textContent = `❌ Error: ${error}`;
+  clearTranscriptionResult();
+}
+
+function clearTranscriptionResult() {
+  transcriptionResult.innerHTML = "";
+  transcriptionResult.classList.add("tlx-hidden");
+}
 }
 
 function findEndOfCentralDirectory(bytes) {
