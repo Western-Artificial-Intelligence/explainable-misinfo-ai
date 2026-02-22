@@ -38,6 +38,17 @@ except ModuleNotFoundError as exc:
         exc.name,
     )
 
+# Unified production pipeline route
+try:
+    from .routes import pipeline
+    app.include_router(pipeline.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/pipeline routes because dependency is missing: %s. "
+        "Install optional deps to enable it.",
+        exc.name,
+    )
+
 # Production route is optional because it relies on extra dependencies.
 try:
     from .routes import production
