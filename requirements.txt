@@ -28,11 +28,8 @@ streamlit>=1.28.0
 # Evaluation / Data
 evaluate
 kagglehub
-matplotlib>=3.7.0
-
-# Code quality
-pre-commit
-ruff
-black
-isort
-pytest
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+httpx
