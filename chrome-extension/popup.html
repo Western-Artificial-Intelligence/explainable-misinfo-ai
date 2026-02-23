@@ -17,7 +17,17 @@
       </header>
 
       <section class="tlx-section">
-        <h2>Analyze Selected Text</h2>
+        <h2>Video Transcription (Voice-to-Text)</h2>
+        <p class="tlx-muted">Play a video on the current page, then click below to capture and transcribe audio.</p>
+        <div class="tlx-actions-row">
+          <button id="startAudioBtn" class="tlx-btn tlx-btn-primary">Start Audio Capture</button>
+          <button id="stopAudioBtn" class="tlx-btn tlx-btn-outline tlx-hidden">Stop & Transcribe</button>
+        </div>
+        <p id="audioStatus" class="tlx-muted"></p>
+        <div id="transcriptionResult" class="tlx-result-box tlx-hidden"></div>
+      </section>
+
+      <section class="tlx-section">
         <p class="tlx-muted">Highlight text on the page, then click below or right-click and choose “Analyze with TruthLens”.</p>
         <button id="analyzeSelectionBtn" class="tlx-btn tlx-btn-primary">Analyze Selected Text</button>
         <div id="selectionResult" class="tlx-result-box tlx-hidden"></div>

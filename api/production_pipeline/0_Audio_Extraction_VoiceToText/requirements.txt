@@ -1,0 +1,17 @@
+# Audio Extraction and Voice-to-Text Pipeline Dependencies
+# Install with: pip install -r requirements-audio.txt
+
+# Speech-to-Text
+openai-whisper>=20230314
+
+# Audio Processing
+pydub>=0.25.1
+
+# Video/Audio Download
+yt-dlp>=2023.03.04
+
+# System Dependencies (must be installed separately):
+# - ffmpeg (for audio/video processing)
+#   Windows: choco install ffmpeg
+#   macOS: brew install ffmpeg
+#   Linux: sudo apt-get install ffmpeg

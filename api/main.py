@@ -27,6 +27,28 @@ app.include_router(health.router)
 app.include_router(classify.router)
 app.include_router(documents.router)
 
+# Audio extraction and voice-to-text route
+try:
+    from .routes import audio
+    app.include_router(audio.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/audio routes because dependency is missing: %s. "
+        "Install optional audio deps to enable it.",
+        exc.name,
+    )
+
+# Unified production pipeline route
+try:
+    from .routes import pipeline
+    app.include_router(pipeline.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/pipeline routes because dependency is missing: %s. "
+        "Install optional deps to enable it.",
+        exc.name,
+    )
+
 # Production route is optional because it relies on extra dependencies.
 try:
     from .routes import production

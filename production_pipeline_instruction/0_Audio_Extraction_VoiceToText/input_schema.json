@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "description": "Unique request identifier"
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Unique claim identifier"
+    },
+    "media_source": {
+      "type": "string",
+      "description": "File path, URL, or reference to media"
+    },
+    "media_type": {
+      "type": "string",
+      "enum": ["video", "audio", "url"],
+      "description": "Type of media input"
+    },
+    "language": {
+      "type": "string",
+      "description": "ISO 639-1 language code (optional, e.g., 'en', 'es')"
+    },
+    "model_size": {
+      "type": "string",
+      "enum": ["tiny", "base", "small", "medium", "large"],
+      "default": "base",
+      "description": "Whisper model size (larger = more accurate but slower)"
+    }
+  },
+  "required": ["media_source", "media_type"],
+  "additionalProperties": false
+}
