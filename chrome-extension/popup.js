@@ -18,8 +18,15 @@ const stopAudioBtn = document.getElementById("stopAudioBtn");
 const audioStatus = document.getElementById("audioStatus");
 const transcriptionResult = document.getElementById("transcriptionResult");
 
+const autoDetectCaptureBtn = document.getElementById("autoDetectCaptureBtn");
+const startImageCaptureBtn = document.getElementById("startImageCaptureBtn");
+const stopImageCaptureBtn = document.getElementById("stopImageCaptureBtn");
+const imageStatus = document.getElementById("imageStatus");
+const imageAnalysisResult = document.getElementById("imageAnalysisResult");
+
 let overlaysEnabled = false;
 let audioCapturing = false;
+let imageCapturing = false;
 
 initPopup();
 
@@ -30,6 +37,9 @@ async function initPopup() {
   analyzeDocumentBtn.addEventListener("click", onAnalyzeDocument);
   startAudioBtn.addEventListener("click", onStartAudioCapture);
   stopAudioBtn.addEventListener("click", onStopAudioCapture);
+  autoDetectCaptureBtn.addEventListener("click", onAutoDetectCapture);
+  startImageCaptureBtn.addEventListener("click", onStartImageCapture);
+  stopImageCaptureBtn.addEventListener("click", onStopImageCapture);
 
   // Listen for transcription results from content script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -37,6 +47,10 @@ async function initPopup() {
       renderTranscriptionResult(message.payload);
     } else if (message.type === "TRANSCRIPTION_ERROR") {
       renderTranscriptionError(message.payload?.error || "Unknown error");
+    } else if (message.type === "IMAGE_ANALYSIS_COMPLETE") {
+      renderImageAnalysisResult(message.payload);
+    } else if (message.type === "IMAGE_ANALYSIS_ERROR") {
+      renderImageAnalysisError(message.payload?.error || "Unknown error");
     }
   });
 
@@ -605,6 +619,188 @@ function clearTranscriptionResult() {
   transcriptionResult.innerHTML = "";
   transcriptionResult.classList.add("tlx-hidden");
 }
+
+async function onAutoDetectCapture() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderImageAnalysisError("Could not access active tab.");
+    return;
+  }
+
+  imageStatus.textContent = "Analyzing video audio levels...";
+  setBusy(autoDetectCaptureBtn, true, "Analyzing...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "SHOULD_USE_IMAGE_CAPTURE" },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to analyze video");
+    }
+
+    const { shouldCapture, audioAnalysis } = response.result;
+
+    if (shouldCapture) {
+      imageStatus.textContent = `📸 ${audioAnalysis.reason} - Starting image capture...`;
+      await startImageCaptureInternal();
+    } else {
+      imageStatus.textContent = `🔊 ${audioAnalysis.reason} - Use audio capture instead.`;
+      setBusy(autoDetectCaptureBtn, false, "Auto-Detect & Start");
+    }
+
+  } catch (error) {
+    renderImageAnalysisError(error.message);
+    setBusy(autoDetectCaptureBtn, false, "Auto-Detect & Start");
+  }
+}
+
+async function onStartImageCapture() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderImageAnalysisError("Could not access active tab.");
+    return;
+  }
+
+  imageStatus.textContent = "Starting image capture (forced)...";
+  setBusy(startImageCaptureBtn, true, "Starting...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "START_IMAGE_CAPTURE", payload: { forceCapture: true } },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to start image capture");
+    }
+
+    imageCapturing = true;
+    imageStatus.textContent = "📸 Capturing frames and text...";
+    startImageCaptureBtn.classList.add("tlx-hidden");
+    autoDetectCaptureBtn.classList.add("tlx-hidden");
+    stopImageCaptureBtn.classList.remove("tlx-hidden");
+    clearImageAnalysisResult();
+
+  } catch (error) {
+    renderImageAnalysisError(error.message);
+    setBusy(startImageCaptureBtn, false, "Force Image Capture");
+  }
+}
+
+async function startImageCaptureInternal() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderImageAnalysisError("Could not access active tab.");
+    return;
+  }
+
+  setBusy(autoDetectCaptureBtn, true, "Capturing...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "START_IMAGE_CAPTURE" },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to start image capture");
+    }
+
+    imageCapturing = true;
+    imageStatus.textContent = "📸 Capturing frames and text...";
+    startImageCaptureBtn.classList.add("tlx-hidden");
+    autoDetectCaptureBtn.classList.add("tlx-hidden");
+    stopImageCaptureBtn.classList.remove("tlx-hidden");
+    clearImageAnalysisResult();
+
+  } catch (error) {
+    renderImageAnalysisError(error.message);
+    setBusy(autoDetectCaptureBtn, false, "Auto-Detect & Start");
+  }
+}
+
+async function onStopImageCapture() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderImageAnalysisError("Could not access active tab.");
+    return;
+  }
+
+  imageStatus.textContent = "Stopping capture and analyzing...";
+  setBusy(stopImageCaptureBtn, true, "Processing...");
+
+  try {
+    const response = await sendToContentScript(
+      tab,
+      { type: "STOP_IMAGE_CAPTURE" },
+      { injectIfNeeded: true }
+    );
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Failed to stop image capture");
+    }
+
+    imageCapturing = false;
+    imageStatus.textContent = "Analyzing frames and text... This may take a moment.";
+
+  } catch (error) {
+    renderImageAnalysisError(error.message);
+    imageCapturing = false;
+    stopImageCaptureBtn.classList.add("tlx-hidden");
+    startImageCaptureBtn.classList.remove("tlx-hidden");
+    autoDetectCaptureBtn.classList.remove("tlx-hidden");
+    setBusy(stopImageCaptureBtn, false, "Stop & Analyze");
+  }
+}
+
+function renderImageAnalysisResult(result) {
+  stopImageCaptureBtn.classList.add("tlx-hidden");
+  startImageCaptureBtn.classList.remove("tlx-hidden");
+  autoDetectCaptureBtn.classList.remove("tlx-hidden");
+  setBusy(stopImageCaptureBtn, false, "Stop & Analyze");
+
+  imageStatus.textContent = "✅ Image analysis complete!";
+  
+  const frameCount = result.frame_count || 0;
+  const textExtracted = result.captured_text?.length || 0;
+  const analysisResult = result.analysis || {};
+
+  const html = `
+    <div class="tlx-result-header">
+      <strong>Image & Text Analysis</strong>
+      <small>${frameCount} frames • ${textExtracted} text elements</small>
+    </div>
+    <div class="tlx-result-meta">
+      <p><strong>Extracted Text:</strong></p>
+      <div class="tlx-extracted-text">${escapeHtml(result.captured_text?.join('\n') || 'No text extracted')}</div>
+    </div>
+    <div class="tlx-result-meta">
+      <small>Request ID: ${escapeHtml(result.request_id || 'N/A')}</small>
+    </div>
+  `;
+
+  imageAnalysisResult.innerHTML = html;
+  imageAnalysisResult.classList.remove("tlx-hidden");
+}
+
+function renderImageAnalysisError(error) {
+  stopImageCaptureBtn.classList.add("tlx-hidden");
+  startImageCaptureBtn.classList.remove("tlx-hidden");
+  autoDetectCaptureBtn.classList.remove("tlx-hidden");
+  setBusy(stopImageCaptureBtn, false, "Stop & Analyze");
+
+  imageStatus.textContent = `❌ Error: ${error}`;
+  clearImageAnalysisResult();
+}
+
+function clearImageAnalysisResult() {
+  imageAnalysisResult.innerHTML = "";
+  imageAnalysisResult.classList.add("tlx-hidden");
 }
 
 function findEndOfCentralDirectory(bytes) {

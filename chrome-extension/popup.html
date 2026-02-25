@@ -28,6 +28,18 @@
       </section>
 
       <section class="tlx-section">
+        <h2>Image & Text Capture (No Voice)</h2>
+        <p class="tlx-muted">For videos with minimal audio: captures frames and text overlays for analysis.</p>
+        <div class="tlx-actions-row">
+          <button id="autoDetectCaptureBtn" class="tlx-btn tlx-btn-primary">Auto-Detect & Start</button>
+          <button id="startImageCaptureBtn" class="tlx-btn tlx-btn-secondary">Force Image Capture</button>
+          <button id="stopImageCaptureBtn" class="tlx-btn tlx-btn-outline tlx-hidden">Stop & Analyze</button>
+        </div>
+        <p id="imageStatus" class="tlx-muted"></p>
+        <div id="imageAnalysisResult" class="tlx-result-box tlx-hidden"></div>
+      </section>
+
+      <section class="tlx-section">
         <p class="tlx-muted">Highlight text on the page, then click below or right-click and choose “Analyze with TruthLens”.</p>
         <button id="analyzeSelectionBtn" class="tlx-btn tlx-btn-primary">Analyze Selected Text</button>
         <div id="selectionResult" class="tlx-result-box tlx-hidden"></div>

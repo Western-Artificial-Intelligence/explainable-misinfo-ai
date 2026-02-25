@@ -317,3 +317,30 @@
   display: block;
 }
 
+.tlx-btn-secondary {
+  background: #f3f4f6;
+  border-color: #d7dde8;
+  color: #475569;
+  font-size: 11px;
+}
+
+.tlx-btn-secondary:hover:enabled {
+  background: #e5e7eb;
+  transform: translateY(-1px);
+}
+
+.tlx-extracted-text {
+  background: #f9fafb;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 11px;
+  font-family: "Monaco", "Menlo", monospace;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+  color: #374151;
+  line-height: 1.5;
+}
+
