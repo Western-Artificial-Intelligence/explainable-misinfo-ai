@@ -31,11 +31,11 @@ app.include_router(documents.router)
 try:
     from .routes import audio
     app.include_router(audio.router)
-except ModuleNotFoundError as exc:
+except (ModuleNotFoundError, ImportError) as exc:
     logger.warning(
         "Skipping /api/audio routes because dependency is missing: %s. "
         "Install optional audio deps to enable it.",
-        exc.name,
+        getattr(exc, "name", exc),
     )
 
 # Image processing and OCR route

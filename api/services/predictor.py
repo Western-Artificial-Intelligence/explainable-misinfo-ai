@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import importlib
 import logging
-import os
 import random
-from typing import Any, Callable
+from typing import Any
+
+from api.services.model_inference import is_model_available, predict as model_predict
 
 logger = logging.getLogger(__name__)
-
-PredictFn = Callable[[str], dict[str, Any]]
-
-_model_predict_fn: PredictFn | None = None
-_model_load_attempted = False
 
 
 def _fallback_prediction() -> dict[str, Any]:
@@ -49,53 +44,13 @@ def _normalize_output(raw_output: Any) -> dict[str, Any]:
     }
 
 
-def _load_model_predictor() -> PredictFn | None:
-    global _model_load_attempted, _model_predict_fn
-
-    if _model_load_attempted:
-        return _model_predict_fn
-
-    _model_load_attempted = True
-
-    module_name = os.getenv("TRUTHLENS_MODEL_MODULE", "").strip()
-    function_name = os.getenv("TRUTHLENS_MODEL_FUNCTION", "predict").strip() or "predict"
-
-    if not module_name:
-        logger.info(
-            "No TRUTHLENS_MODEL_MODULE configured; using random fallback predictor.",
-        )
-        return None
-
-    try:
-        module = importlib.import_module(module_name)
-        fn = getattr(module, function_name)
-        if not callable(fn):
-            raise TypeError(f"{module_name}.{function_name} is not callable")
-        _model_predict_fn = fn
-        logger.info(
-            "Loaded model predictor from %s.%s",
-            module_name,
-            function_name,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Could not load model predictor from %s.%s (%s). Falling back to random predictor.",
-            module_name,
-            function_name,
-            exc,
-        )
-        _model_predict_fn = None
-
-    return _model_predict_fn
-
-
 def predict_text(text: str) -> dict[str, Any]:
-    predictor_fn = _load_model_predictor()
-    if predictor_fn is None:
+    if not is_model_available():
+        logger.warning("No RoBERTa checkpoint available; using random fallback predictor.")
         return _fallback_prediction()
 
     try:
-        raw_output = predictor_fn(text)
+        raw_output = model_predict(claim=text)
         return _normalize_output(raw_output)
     except Exception:  # noqa: BLE001
         logger.exception("Model inference failed; returning fallback prediction.")

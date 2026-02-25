@@ -1,12 +1,14 @@
 # 2_roberta_inference.py
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
-import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 LABELS_3WAY = ["false", "mixed", "true"]
 CTX_TOKENS_MAX = 512
@@ -22,6 +24,13 @@ MODEL_NAME = os.getenv("ROBERTA_MODEL_NAME", "roberta-base(+lora)")
 MODEL_REVISION = os.getenv("ROBERTA_MODEL_REVISION", "dev")
 
 EPS = 1e-9
+
+# Try to import real model inference
+try:
+    from api.services.model_inference import is_model_available, predict as _real_predict
+    _HAS_REAL_MODEL = True
+except ImportError:
+    _HAS_REAL_MODEL = False
 
 
 class RobertaInferenceError(Exception):
@@ -41,13 +50,11 @@ def _softmax(logits: List[float]) -> List[float]:
     exps = [math.exp(x - m) for x in logits]
     s = sum(exps)
     if s == 0:
-        # defensive (should never happen)
         return [1.0 / len(logits)] * len(logits)
     return [e / s for e in exps]
 
 
 def _argmax_eps(vals: List[float]) -> int:
-    # deterministic tie-break: earliest index within EPS of max
     m = max(vals)
     for i, v in enumerate(vals):
         if abs(v - m) <= EPS:
@@ -56,39 +63,27 @@ def _argmax_eps(vals: List[float]) -> int:
 
 
 def _build_model_text(normalized_claim: str) -> str:
-    # x = "<CLAIM> " + normalized_claim + " </CLAIM>"
     return f"<CLAIM> {normalized_claim} </CLAIM>"
 
 
-def _pretend_tokenize(x: str) -> Dict[str, Any]:
-    """
-    Stand-in tokenizer:
-    - counts whitespace-separated tokens deterministically
-    - applies truncation against T_CONFIG
-    """
-    # crude token proxy (good enough for now)
-    original_tokens = len(x.split())
-    truncated = original_tokens > T_CONFIG
-    input_tokens = min(original_tokens, T_CONFIG)
+def roberta_infer(payload: Any) -> Dict[str, Any]:
+    """Run real RoBERTa inference if a checkpoint is available, otherwise raise."""
+    if not _HAS_REAL_MODEL or not is_model_available():
+        raise RobertaInferenceError(
+            code="MODEL_NOT_AVAILABLE",
+            message="Real RoBERTa model not available. Set TRUTHLENS_CHECKPOINT_PATH.",
+        )
 
+    claim_text = payload.get("x", "") if isinstance(payload, dict) else str(payload)
+    # Strip the <CLAIM> wrapper if present (model_inference adds its own)
+    claim_text = claim_text.replace("<CLAIM>", "").replace("</CLAIM>", "").strip()
+
+    pred = _real_predict(claim=claim_text, max_len=T_CONFIG)
     return {
-        "input_tokens": max(1, input_tokens),
-        "truncated": truncated,
+        "h": None,
+        "label_logits": pred["logits"],
+        "label_probs": pred["probs"],
     }
-
-
-def roberta_infer(_: Any) -> Dict[str, Any]:
-    """
-    Pretend this exists in production and returns:
-      { "h": optional embedding, "label_logits": [3 floats], "label_probs": [3 floats] }
-    For now: deterministic mock based on hash.
-    """
-    # Deterministic logits from sha256
-    digest = hashlib.sha256(str(_).encode("utf-8")).digest()
-    # map 3 bytes -> [-2, 2]
-    logits = [((digest[i] / 255.0) * 4.0 - 2.0) for i in range(3)]
-    probs = _softmax(logits)
-    return {"h": None, "label_logits": logits, "label_probs": probs}
 
 
 def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,7 +109,9 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
 
     x = _build_model_text(normalized_claim)
 
-    tok = _pretend_tokenize(x)
+    # Estimate token count for metadata
+    input_tokens = len(x.split())
+    truncated = input_tokens > T_CONFIG
 
     t0 = time.perf_counter()
     pred = roberta_infer({"x": x, "T_CONFIG": T_CONFIG})
@@ -146,8 +143,8 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
                 "ctx_tokens": CTX_TOKENS_MAX,
             },
             "tokenization": {
-                "truncated": bool(tok["truncated"]),
-                "input_tokens": int(tok["input_tokens"]),
+                "truncated": truncated,
+                "input_tokens": min(input_tokens, T_CONFIG),
             },
         },
         "meta": {

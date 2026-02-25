@@ -14,10 +14,13 @@ import tempfile
 import json
 from datetime import datetime
 
-from api.production_pipeline.0_Audio_Extraction_VoiceToText import (
-    AudioExtractionPipeline,
-    AudioExtractionError,
+import importlib
+
+_audio_mod = importlib.import_module(
+    "api.production_pipeline.0_Audio_Extraction_VoiceToText"
 )
+AudioExtractionPipeline = _audio_mod.AudioExtractionPipeline
+AudioExtractionError = _audio_mod.AudioExtractionError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/audio", tags=["audio"])
