@@ -2,11 +2,11 @@
  * Image & Text Capture Module for TikTok/YouTube Shorts
  * 
  * This module handles:
- * 1. Detecting if video has minimal/no voice
- * 2. Capturing frames from video elements
- * 3. Extracting text via OCR (Tesseract.js)
- * 4. Capturing on-screen text overlays
- * 5. Sending image+text to backend for analysis
+ * 1. Intelligent silence detection using RMS analysis
+ * 2. Smart frame capture (1 frame per 1.5s or on text change)
+ * 3. Text extraction via OCR and DOM scraping
+ * 4. Comprehensive text cleanup
+ * 5. Integration with misinfo detection pipeline
  */
 
 const TLX_IMAGE_STATE = {
@@ -18,62 +18,193 @@ const TLX_IMAGE_STATE = {
   requestId: null,
   claimId: null,
   audioAnalysis: null,
-  captureInterval: null
+  captureInterval: null,
+  frameBuffer: null,
+  lastFrameHash: null,
+  audioContext: null,
+  analyser: null,
 };
 
+// ==========================================
+// Audio Analysis for Silence Detection
+// ==========================================
+
 /**
- * Analyze audio levels to determine if video has meaningful voice content
- * Returns true if audio is minimal/no voice detected
+ * Analyze audio levels using RMS (Root Mean Square) energy.
+ * This determines if there is meaningful voice content.
+ * 
+ * Algorithm:
+ * - Capture audio context from video element
+ * - Sample frequency data every 100ms
+ * - Calculate RMS energy from frequency domain
+ * - Compare against thresholds
+ * - If < VOICE_THRESHOLD for extended period -> use image capture
  */
-async function analyzeAudioLevels(videoElement) {
+async function analyzeAudioLevelsAdvanced(videoElement) {
   try {
-    // Create audio context
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioContext();
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
 
     const source = audioContext.createMediaElementAudioSource(videoElement);
     source.connect(analyser);
     analyser.connect(audioContext.destination);
 
-    // Get frequency data
+    // RMS thresholds (normalized 0-1)
+    const SILENCE_THRESHOLD = 0.02; // ~-34 dB
+    const VOICE_THRESHOLD = 0.05;   // ~-26 dB
+    const MIN_VOICE_RATIO = 0.1;    // At least 10% voice
+    const SAMPLE_DURATION_MS = 1000; // Sample for 1 second
+
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     
     return new Promise((resolve) => {
-      // Sample audio analysis over a brief period
-      let samples = 0;
-      let totalEnergy = 0;
+      let samples = [];
+      let silenceCount = 0;
+      let voiceCount = 0;
+      
       const sampleInterval = setInterval(() => {
         analyser.getByteFrequencyData(dataArray);
         
-        // Calculate energy across frequency bands
-        let energy = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        totalEnergy += energy;
-        samples++;
-
-        // After 5 samples (~500ms), determine if voice exists
-        if (samples >= 5) {
+        // Calculate RMS from frequency bins
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const normalized = dataArray[i] / 255.0;
+          sum += normalized * normalized;
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        samples.push(rms);
+        
+        // Categorize sample
+        if (rms < SILENCE_THRESHOLD) {
+          silenceCount++;
+        } else if (rms >= VOICE_THRESHOLD) {
+          voiceCount++;
+        }
+        
+        // After ~1 second of sampling, evaluate
+        if (samples.length * 100 >= SAMPLE_DURATION_MS) {
           clearInterval(sampleInterval);
-          audioContext.close();
           
-          const avgEnergy = totalEnergy / samples;
-          const hasNoVoice = avgEnergy < 30; // Threshold for minimal audio
+          const avgEnergy = samples.reduce((a, b) => a + b, 0) / samples.length;
+          const voiceRatio = voiceCount / samples.length;
+          const hasVoice = voiceRatio >= MIN_VOICE_RATIO && avgEnergy >= VOICE_THRESHOLD;
           
-          console.log(`[TruthLens] Audio analysis - Avg energy: ${avgEnergy.toFixed(2)}, Has voice: ${!hasNoVoice}`);
+          console.log(
+            `[TruthLens] Audio Analysis - Avg RMS: ${avgEnergy.toFixed(3)}, ` +
+            `Voice Ratio: ${(voiceRatio * 100).toFixed(1)}%, ` +
+            `Has Voice: ${hasVoice}`
+          );
+          
+          // Attempt to close audio context
+          try {
+            audioContext.close();
+          } catch (e) {
+            // Context may already be closed
+          }
           
           resolve({
-            hasVoice: !hasNoVoice,
+            hasVoice: hasVoice,
             averageEnergy: avgEnergy,
-            shouldCaptureImage: hasNoVoice
+            voiceRatio: voiceRatio,
+            shouldCaptureImage: !hasVoice,
+            sampleCount: samples.length,
           });
         }
       }, 100);
+      
+      // Fallback timeout (2 seconds)
+      setTimeout(() => {
+        clearInterval(sampleInterval);
+        if (samples.length > 0) {
+          const avgEnergy = samples.reduce((a, b) => a + b, 0) / samples.length;
+          const voiceRatio = voiceCount / samples.length;
+          const hasVoice = voiceRatio >= MIN_VOICE_RATIO && avgEnergy >= VOICE_THRESHOLD;
+          
+          try {
+            audioContext.close();
+          } catch (e) {}
+          
+          resolve({
+            hasVoice: hasVoice,
+            averageEnergy: avgEnergy,
+            voiceRatio: voiceRatio,
+            shouldCaptureImage: !hasVoice,
+            sampleCount: samples.length,
+          });
+        } else {
+          resolve({
+            hasVoice: false,
+            averageEnergy: 0,
+            voiceRatio: 0,
+            shouldCaptureImage: true,
+            sampleCount: 0,
+          });
+        }
+      }, 2500);
     });
   } catch (error) {
-    console.warn("[TruthLens] Audio analysis failed, defaulting to image capture:", error);
-    return { hasVoice: false, shouldCaptureImage: true };
+    console.warn("[TruthLens] Audio analysis failed:", error);
+    return {
+      hasVoice: false,
+      averageEnergy: 0,
+      voiceRatio: 0,
+      shouldCaptureImage: true,
+      sampleCount: 0,
+    };
   }
 }
+
+// ==========================================
+// Frame Capture with Smart Sampling
+// ==========================================
+
+/**
+ * Calculate frame hash to detect significant visual changes.
+ * Uses simple pixel sampling to avoid expensive full hashing.
+ */
+function calculateFrameHash(canvas) {
+  try {
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Sample every 1000th pixel to keep it fast
+    let hash = 0;
+    for (let i = 0; i < data.length; i += 4000) {
+      hash = ((hash << 5) - hash) + (data[i] + data[i+1] + data[i+2]);
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    return hash;
+  } catch (e) {
+    return Date.now();
+  }
+}
+
+/**
+ * Determine if frame is significantly different from previous.
+ * Helps avoid capturing redundant similar frames.
+ */
+function hasFrameChanged(canvas, threshold = 0.1) {
+  const currentHash = calculateFrameHash(canvas);
+  
+  if (TLX_IMAGE_STATE.lastFrameHash === null) {
+    TLX_IMAGE_STATE.lastFrameHash = currentHash;
+    return true;
+  }
+  
+  const changed = Math.abs(currentHash - TLX_IMAGE_STATE.lastFrameHash) > 1000;
+  TLX_IMAGE_STATE.lastFrameHash = currentHash;
+  
+  return changed;
+}
+
+// ==========================================
+// Initialization
+// ==========================================
 
 /**
  * Initialize image capture listeners
@@ -122,12 +253,14 @@ async function shouldUseImageCapture(payload = {}) {
       return { shouldCapture: false, reason: "No video element found" };
     }
 
-    const audioAnalysis = await analyzeAudioLevels(videoElement);
+    const audioAnalysis = await analyzeAudioLevelsAdvanced(videoElement);
     
     return {
       shouldCapture: audioAnalysis.shouldCaptureImage,
       audioAnalysis: audioAnalysis,
-      reason: audioAnalysis.shouldCaptureImage ? "Minimal audio detected" : "Voice content detected"
+      reason: audioAnalysis.shouldCaptureImage 
+        ? `Minimal audio detected (${(audioAnalysis.voiceRatio * 100).toFixed(1)}% voice)`
+        : `Voice content detected (${(audioAnalysis.voiceRatio * 100).toFixed(1)}% voice)`
     };
 
   } catch (error) {
@@ -145,7 +278,6 @@ async function startImageCapture(payload = {}) {
       throw new Error("Image capture already in progress");
     }
 
-    // Generate request and claim IDs
     const requestId = `req_img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const claimId = `claim_${Date.now()}`;
 
@@ -154,10 +286,10 @@ async function startImageCapture(payload = {}) {
     TLX_IMAGE_STATE.isCapturing = true;
     TLX_IMAGE_STATE.extractedFrames = [];
     TLX_IMAGE_STATE.extractedText = [];
+    TLX_IMAGE_STATE.lastFrameHash = null;
 
     console.log(`[TruthLens] Starting image capture: ${requestId}`);
 
-    // Find video element
     const videoElement = findVideoElement();
     if (!videoElement) {
       throw new Error("No video element found on page");
@@ -166,26 +298,28 @@ async function startImageCapture(payload = {}) {
     TLX_IMAGE_STATE.currentVideoElement = videoElement;
 
     // Analyze audio to confirm we should use image capture
-    const audioAnalysis = await analyzeAudioLevels(videoElement);
-    TLX_IMAGE_STATE.audioAnalysis = audioAnalysis;
+    if (!payload.forceCapture) {
+      const audioAnalysis = await analyzeAudioLevelsAdvanced(videoElement);
+      TLX_IMAGE_STATE.audioAnalysis = audioAnalysis;
 
-    if (!audioAnalysis.shouldCaptureImage && !payload.forceCapture) {
-      throw new Error("Video has voice content - use audio capture instead");
+      if (!audioAnalysis.shouldCaptureImage) {
+        throw new Error("Video has voice content - use audio capture instead");
+      }
     }
 
     // Ensure Tesseract.js is loaded
     await ensureTesseractLoaded();
 
-    // Start frame capture
-    startFrameCapture(videoElement);
-
     // Extract on-screen text elements
     await extractOnScreenText();
+
+    // Start frame capture loop
+    startFrameCaptureLoop(videoElement);
 
     return {
       requestId,
       claimId,
-      audioAnalysis: audioAnalysis,
+      audioAnalysis: TLX_IMAGE_STATE.audioAnalysis,
       message: "Image capture started"
     };
 
@@ -207,7 +341,6 @@ async function stopImageCapture() {
 
     console.log("[TruthLens] Stopping image capture");
 
-    // Stop frame capture
     if (TLX_IMAGE_STATE.captureInterval) {
       clearInterval(TLX_IMAGE_STATE.captureInterval);
       TLX_IMAGE_STATE.captureInterval = null;
@@ -215,7 +348,6 @@ async function stopImageCapture() {
 
     TLX_IMAGE_STATE.isCapturing = false;
 
-    // Send captured data to backend
     if (TLX_IMAGE_STATE.extractedFrames.length > 0 || TLX_IMAGE_STATE.extractedText.length > 0) {
       await sendImageAndTextForAnalysis();
     }
@@ -229,53 +361,73 @@ async function stopImageCapture() {
 }
 
 /**
- * Capture frames from video at regular intervals
+ * Smart frame capture loop: 1 frame per 1.5s OR on significant visual change
  */
-function startFrameCapture(videoElement) {
+function startFrameCaptureLoop(videoElement) {
   const canvas = document.createElement('canvas');
   canvas.width = videoElement.videoWidth || 640;
   canvas.height = videoElement.videoHeight || 360;
   TLX_IMAGE_STATE.canvasContext = canvas.getContext('2d');
+  
+  let lastCaptureTime = 0;
+  const MIN_CAPTURE_INTERVAL_MS = 1500; // 1.5 seconds
+  const MAX_FRAMES = 15; // Limit frames to avoid excessive data
 
-  // Capture every 500ms (can be adjusted)
   TLX_IMAGE_STATE.captureInterval = setInterval(async () => {
+    if (!TLX_IMAGE_STATE.isCapturing) return;
+    if (TLX_IMAGE_STATE.extractedFrames.length >= MAX_FRAMES) {
+      clearInterval(TLX_IMAGE_STATE.captureInterval);
+      return;
+    }
+
+    const now = Date.now();
+    
+    // Draw current frame to canvas
     try {
-      if (!TLX_IMAGE_STATE.isCapturing) return;
-
-      // Draw current frame to canvas
       TLX_IMAGE_STATE.canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+      
+      // Check if frame changed significantly or enough time has passed
+      const shouldCapture = (now - lastCaptureTime > MIN_CAPTURE_INTERVAL_MS) || hasFrameChanged(canvas);
+      
+      if (!shouldCapture) return;
+      
+      lastCaptureTime = now;
 
-      // Convert to blob
       canvas.toBlob(async (blob) => {
-        if (blob && TLX_IMAGE_STATE.extractedFrames.length < 20) { // Limit to 20 frames
+        if (blob && TLX_IMAGE_STATE.extractedFrames.length < MAX_FRAMES) {
           const frameData = {
-            timestamp: Date.now(),
+            timestamp: now,
             blob: blob,
-            text: null // Will be populated by OCR
+            text: null,
           };
 
-          // Run OCR on frame
           try {
             const ocrText = await performOCROnFrame(blob);
             frameData.text = ocrText;
+            
             if (ocrText && ocrText.trim().length > 0) {
-              TLX_IMAGE_STATE.extractedText.push(ocrText);
+              if (!TLX_IMAGE_STATE.extractedText.includes(ocrText.trim())) {
+                TLX_IMAGE_STATE.extractedText.push(ocrText.trim());
+              }
             }
           } catch (ocrError) {
-            console.warn("[TruthLens] OCR error on frame:", ocrError);
+            console.warn("[TruthLens] OCR error:", ocrError);
           }
 
           TLX_IMAGE_STATE.extractedFrames.push(frameData);
-          console.log(`[TruthLens] Captured frame ${TLX_IMAGE_STATE.extractedFrames.length}, OCR text length: ${frameData.text?.length || 0}`);
+          console.log(
+            `[TruthLens] Frame ${TLX_IMAGE_STATE.extractedFrames.length}: ` +
+            `${frameData.text?.length || 0} chars from OCR`
+          );
         }
-      }, 'image/jpeg', 0.7);
+      }, 'image/jpeg', 0.65); // Slightly lower quality to reduce payload
 
     } catch (error) {
-      console.error("[TruthLens] Error capturing frame:", error);
+      console.error("[TruthLens] Frame capture error:", error);
     }
-  }, 500);
+  }, 300); // Check every 300ms, but only save every 1.5s+
 
-  console.log("[TruthLens] Frame capture started");
+  console.log("[TruthLens] Frame capture loop started");
 }
 
 /**
@@ -288,7 +440,15 @@ async function performOCROnFrame(imageBlob) {
     }
 
     const { data } = await window.Tesseract.recognize(imageBlob, 'eng', {
-      logger: msg => console.log(`[TruthLens] OCR progress:`, msg)
+      logger: msg => {
+        if (msg.status === 'recognizing') {
+          // Only log major progress
+          const progress = (msg.progress * 100).toFixed(0);
+          if (progress % 25 === 0) {
+            console.log(`[TruthLens] OCR: ${progress}%`);
+          }
+        }
+      }
     });
 
     return data.text || "";
@@ -305,7 +465,7 @@ async function performOCROnFrame(imageBlob) {
 async function extractOnScreenText() {
   try {
     const textElements = document.querySelectorAll(
-      'p, span, div, h1, h2, h3, h4, h5, h6, [data-caption], .caption, .subtitle, .text-overlay'
+      'p, span, div, h1, h2, h3, h4, h5, h6, [data-caption], .caption, .subtitle, .text-overlay, video ~ *'
     );
 
     const extractedTexts = new Set();
@@ -313,21 +473,19 @@ async function extractOnScreenText() {
     textElements.forEach(element => {
       const text = element.textContent?.trim();
       if (text && text.length > 0 && text.length < 500) {
-        // Filter out common non-content text
-        if (!isCommonUIText(text)) {
+        if (!isCommonUIText(text) && !isLikelyUIControl(text)) {
           extractedTexts.add(text);
         }
       }
     });
 
-    // Add extracted texts to state
     extractedTexts.forEach(text => {
       if (!TLX_IMAGE_STATE.extractedText.includes(text)) {
         TLX_IMAGE_STATE.extractedText.push(text);
       }
     });
 
-    console.log(`[TruthLens] Extracted ${extractedTexts.size} unique text elements from DOM`);
+    console.log(`[TruthLens] Extracted ${extractedTexts.size} DOM text elements`);
 
   } catch (error) {
     console.error("[TruthLens] Error extracting on-screen text:", error);
@@ -338,16 +496,29 @@ async function extractOnScreenText() {
  * Filter out common UI text that's not content
  */
 function isCommonUIText(text) {
-  const commonTexts = [
-    'like', 'comment', 'share', 'follow', 'subscribe',
-    'menu', 'settings', 'profile', 'home', 'trending',
-    'search', 'notifications', 'messages', 'explore'
+  const commonPatterns = [
+    /^\d+[kmb]?\s*$/i, // Numbers like "1.2M", "5K"
+    /^v\d+\.\d+/, // Version numbers
+    /^rate|review|share|follow|subscribe|like|comment|buy|shop/i,
   ];
-  return commonTexts.some(common => text.toLowerCase().includes(common));
+  
+  return commonPatterns.some(pattern => pattern.test(text));
 }
 
 /**
- * Find the video element (same as audio capture)
+ * Detect if text is from UI controls rather than content
+ */
+function isLikelyUIControl(text) {
+  const uiKeywords = [
+    'menu', 'settings', 'profile', 'home', 'trending', 'search',
+    'notifications', 'messages', 'explore', 'close', 'back', 'next'
+  ];
+  
+  return uiKeywords.some(kw => text.toLowerCase().includes(kw));
+}
+
+/**
+ * Find the most visible video element on page
  */
 function findVideoElement() {
   const videoElements = document.querySelectorAll('video');
@@ -383,7 +554,6 @@ async function ensureTesseractLoaded() {
       return;
     }
 
-    // Load Tesseract.js from CDN
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.2/dist/tesseract.min.js';
     script.onload = () => {
@@ -406,7 +576,7 @@ async function sendImageAndTextForAnalysis() {
     const backendUrl = await getBackendUrl();
     const apiUrl = `${backendUrl}/api/image/analyze-claim`;
 
-    console.log(`[TruthLens] Sending image+text analysis to: ${apiUrl}`);
+    console.log(`[TruthLens] Sending ${TLX_IMAGE_STATE.extractedFrames.length} frames to: ${apiUrl}`);
 
     const formData = new FormData();
     formData.append('request_id', TLX_IMAGE_STATE.requestId);
@@ -435,9 +605,8 @@ async function sendImageAndTextForAnalysis() {
     }
 
     const result = await response.json();
-    console.log("[TruthLens] Image analysis result:", result);
+    console.log("[TruthLens] Image analysis complete:", result);
 
-    // Send result to popup
     chrome.runtime.sendMessage({
       type: "IMAGE_ANALYSIS_COMPLETE",
       payload: result
@@ -446,7 +615,7 @@ async function sendImageAndTextForAnalysis() {
     return result;
 
   } catch (error) {
-    console.error("[TruthLens] Error sending image/text for analysis:", error);
+    console.error("[TruthLens] Error sending analysis:", error);
     
     chrome.runtime.sendMessage({
       type: "IMAGE_ANALYSIS_ERROR",

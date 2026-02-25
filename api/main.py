@@ -38,6 +38,17 @@ except ModuleNotFoundError as exc:
         exc.name,
     )
 
+# Image processing and OCR route
+try:
+    from .routes import imageprocessing
+    app.include_router(imageprocessing.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/image routes because dependency is missing: %s. "
+        "Install optional image processing deps to enable it.",
+        exc.name,
+    )
+
 # Unified production pipeline route
 try:
     from .routes import pipeline

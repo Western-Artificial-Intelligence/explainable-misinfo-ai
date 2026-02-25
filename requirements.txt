@@ -33,3 +33,15 @@ uvicorn[standard]
 python-dotenv
 pydantic
 httpx
+# Image Processing & OCR
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Audio Processing
+librosa>=0.10.0
+scipy>=1.11.0
+
+# Security & Validation
+python-multipart>=0.0.6
+aiofiles>=23.2.0
