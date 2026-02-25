@@ -30,6 +30,7 @@
       ],
       "js": [
         "audio-capture.js",
+        "image-capture.js",
         "content.js"
       ],
       "css": [
