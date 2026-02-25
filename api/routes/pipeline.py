@@ -42,10 +42,13 @@ class PipelineResponse(BaseModel):
     """Response model for pipeline"""
     request_id: str
     claim_id: str
-    final_prediction: str
-    confidence: float
-    stages: Dict[str, Any]
-    meta: Dict[str, Any]
+    final_prediction: Optional[str] = None
+    confidence: Optional[float] = None
+    stages: Dict[str, Any] = {}
+    last_stage_output: Optional[Dict[str, Any]] = None
+    meta: Dict[str, Any] = {}
+    error: Optional[str] = None
+    status: Optional[str] = None
 
 
 @router.post("/process-media")
@@ -74,7 +77,7 @@ async def process_media(request: ProcessMediaRequest) -> PipelineResponse:
         logger.info(f"Processing media: {request.media_source}")
         
         runner = PipelineRunner()
-        result = runner.run(
+        result = await runner.run(
             media_source=request.media_source,
             media_type=request.media_type,
             text_input=None,
@@ -119,7 +122,7 @@ async def process_text(request: ProcessTextRequest) -> PipelineResponse:
         logger.info(f"Processing text claim")
         
         runner = PipelineRunner()
-        result = runner.run(
+        result = await runner.run(
             media_source=None,
             media_type=None,
             text_input=request.text,
@@ -188,7 +191,7 @@ async def process_direct(
         
         # Run full pipeline
         runner = PipelineRunner()
-        result = runner.run(
+        result = await runner.run(
             media_source=temp_path,
             media_type=media_type,
             text_input=None,
