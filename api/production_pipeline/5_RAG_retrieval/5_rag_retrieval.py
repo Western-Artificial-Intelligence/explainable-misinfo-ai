@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 from dotenv import load_dotenv
 
+load_dotenv(override=False)
 
-# ----------------------------
-# Errors
-# ----------------------------
+
 class RAGRetrievalError(Exception):
     def __init__(self, code: str, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(message)
@@ -25,10 +25,7 @@ class RAGRetrievalError(Exception):
 # ----------------------------
 # Env helpers
 # ----------------------------
-
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
-    # Load .env at call-time to match the project's pattern
-    load_dotenv(override=False)
     v = os.getenv(name)
     if v is None:
         return default
@@ -36,7 +33,25 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     return v if v != "" else default
 
 
-def _get_timeout_s() -> Optional[float]:
+def _as_int(v: Optional[str], default: int, lo: int, hi: int) -> int:
+    try:
+        x = int(str(v))
+        return max(lo, min(hi, x))
+    except Exception:
+        return default
+
+
+def _as_float(v: Optional[str], default: float, lo: float, hi: float) -> float:
+    try:
+        x = float(str(v))
+        if x != x:  # NaN
+            return default
+        return max(lo, min(hi, x))
+    except Exception:
+        return default
+
+
+def _timeout_s() -> Optional[float]:
     raw = (_env("RAG_HTTP_TIMEOUT_S", "20") or "20").strip().lower()
     if raw in ("0", "none", "null", "inf", "infinite", "unlimited"):
         return None
@@ -46,106 +61,23 @@ def _get_timeout_s() -> Optional[float]:
         return 20.0
 
 
-def _doc_id_from_url(url: str) -> str:
-    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    return f"doc_{h}"
-
-
-def _provider() -> str:
-    # Default to brave (since Google CSE JSON API is often unavailable)
-    p = (_env("RAG_WEB_PROVIDER", "brave") or "brave").strip().lower()
-    if p in ("brave", "brave_search"):
-        return "brave"
-    if p in ("google", "google_cse"):
-        return "google_cse"
-    raise RAGRetrievalError(
-        "UNSUPPORTED_PROVIDER",
-        f"Unsupported RAG_WEB_PROVIDER={p!r}. Use 'brave' or 'google_cse'.",
-    )
-
-
-def _coerce_int(v: Optional[str], default: int, lo: int, hi: int) -> int:
-    try:
-        x = int(str(v))
-        return max(lo, min(hi, x))
-    except Exception:
-        return default
-
-
 # ----------------------------
-# Google CSE settings (optional)
-# ----------------------------
-DEFAULT_GOOGLE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
-DEFAULT_GOOGLE_NUM = 10  # Google CSE max is 10
-
-
-def _get_google_key_and_cx() -> Tuple[str, str]:
-    key = _env("GOOGLE_CSE_API_KEY") or _env("GOOGLE_API_KEY")
-    cx = _env("GOOGLE_CSE_ID") or _env("GOOGLE_CSE_CX")
-    if not key:
-        raise RAGRetrievalError(
-            "MISSING_GOOGLE_API_KEY",
-            "Missing GOOGLE_CSE_API_KEY (or GOOGLE_API_KEY) in environment.",
-        )
-    if not cx:
-        raise RAGRetrievalError(
-            "MISSING_GOOGLE_CSE_ID",
-            "Missing GOOGLE_CSE_ID (cx) in environment.",
-        )
-    return key, cx
-
-
-async def _google_cse_list(
-    *,
-    q: str,
-    start: int,
-    num: int,
-    safe: Optional[str],
-    lr: Optional[str],
-    gl: Optional[str],
-    date_restrict: Optional[str],
-) -> Dict[str, Any]:
-    key, cx = _get_google_key_and_cx()
-    endpoint = _env("GOOGLE_CSE_ENDPOINT", DEFAULT_GOOGLE_ENDPOINT) or DEFAULT_GOOGLE_ENDPOINT
-
-    params: Dict[str, Any] = {
-        "key": key,
-        "cx": cx,
-        "q": q,
-        "start": int(start),
-        "num": int(num),
-    }
-    if safe:
-        params["safe"] = safe
-    if lr:
-        params["lr"] = lr
-    if gl:
-        params["gl"] = gl
-    if date_restrict:
-        params["dateRestrict"] = date_restrict
-
-    timeout = _get_timeout_s()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(endpoint, params=params)
-    except httpx.TimeoutException as e:
-        raise RAGRetrievalError("GOOGLE_TIMEOUT", "Google CSE request timed out.", {"error": str(e)})
-    except httpx.RequestError as e:
-        raise RAGRetrievalError("GOOGLE_CONNECTION", "Could not reach Google CSE endpoint.", {"error": str(e)})
-
-    if r.status_code != 200:
-        details = {"status_code": r.status_code, "body": r.text[:2000]}
-        raise RAGRetrievalError("GOOGLE_BAD_STATUS", f"Google CSE returned HTTP {r.status_code}.", details)
-
-    return r.json()
-
-
-# ----------------------------
-# Brave Search settings
+# Brave Search ONLY
 # ----------------------------
 DEFAULT_BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
-DEFAULT_BRAVE_COUNT = 10  # max 20
-DEFAULT_BRAVE_OFFSET_MAX = 9  # 0..9 (10 pages)
+
+
+def _assert_brave_only() -> None:
+    """
+    Hard-disable Google. If someone sets RAG_WEB_PROVIDER to google_*,
+    fail fast so behavior is obvious.
+    """
+    p = (_env("RAG_WEB_PROVIDER", "brave") or "brave").strip().lower()
+    if p not in ("brave", "brave_search"):
+        raise RAGRetrievalError(
+            "UNSUPPORTED_PROVIDER",
+            f"Only Brave is supported. Got RAG_WEB_PROVIDER={p!r}.",
+        )
 
 
 def _get_brave_key() -> str:
@@ -158,15 +90,39 @@ def _get_brave_key() -> str:
     return key
 
 
+def _doc_id_from_url(url: str) -> str:
+    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return f"doc_{h}"
+
+
 def _domain_from_url(url: str) -> str:
     try:
         u = httpx.URL(url)
-        return (u.host or "")
+        return u.host or ""
     except Exception:
         return ""
 
 
+_TRACKING_KEYS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "gclid", "fbclid", "mc_cid", "mc_eid", "igshid",
+}
+
+
+def _canonicalize_url(url: str) -> str:
+    try:
+        u = httpx.URL(url)
+        u = u.copy_with(fragment="")
+        if u.params:
+            kept = [(k, v) for (k, v) in u.params.multi_items() if k.lower() not in _TRACKING_KEYS]
+            u = u.copy_with(params=kept)
+        return str(u)
+    except Exception:
+        return (url or "").strip()
+
+
 async def _brave_web_search(
+    client: httpx.AsyncClient,
     *,
     q: str,
     offset: int,
@@ -181,11 +137,7 @@ async def _brave_web_search(
     key = _get_brave_key()
     endpoint = _env("BRAVE_ENDPOINT", DEFAULT_BRAVE_ENDPOINT) or DEFAULT_BRAVE_ENDPOINT
 
-    params: Dict[str, Any] = {
-        "q": q,
-        "count": int(count),
-        "offset": int(offset),
-    }
+    params: Dict[str, Any] = {"q": q, "count": int(count), "offset": int(offset)}
     if safesearch:
         params["safesearch"] = safesearch
     if country:
@@ -203,38 +155,34 @@ async def _brave_web_search(
         "Accept": "application/json",
         "Accept-Encoding": "gzip",
         "X-Subscription-Token": key,
-        # Brave recommends/accepts Cache-Control: no-cache to avoid cached content.
-        # Also prevents edge cases where proxies inject other Cache-Control values.
         "Cache-Control": "no-cache",
     }
 
-    timeout = _get_timeout_s()
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(endpoint, params=params, headers=headers)
+        r = await client.get(endpoint, params=params, headers=headers)
     except httpx.TimeoutException as e:
+        # Per your requirement: return/propagate error (no fallback)
         raise RAGRetrievalError("BRAVE_TIMEOUT", "Brave Search request timed out.", {"error": str(e)})
     except httpx.RequestError as e:
         raise RAGRetrievalError("BRAVE_CONNECTION", "Could not reach Brave Search endpoint.", {"error": str(e)})
 
     if r.status_code != 200:
-        details = {"status_code": r.status_code, "body": r.text[:2000]}
-        raise RAGRetrievalError("BRAVE_BAD_STATUS", f"Brave Search returned HTTP {r.status_code}.", details)
+        raise RAGRetrievalError(
+            "BRAVE_BAD_STATUS",
+            f"Brave Search returned HTTP {r.status_code}.",
+            {"status_code": r.status_code, "body": r.text[:2000]},
+        )
 
     return r.json()
 
 
 # ----------------------------
-# Meta helpers (consistent with earlier steps)
+# Meta helpers
 # ----------------------------
-
 def _copy_meta(meta_in: Dict[str, Any]) -> Dict[str, Any]:
-    meta_out: Dict[str, Any] = {
-        "received_at": meta_in.get("received_at"),
-        "version": meta_in.get("version"),
-    }
+    meta_out: Dict[str, Any] = {"received_at": meta_in.get("received_at"), "version": meta_in.get("version")}
     for k in ("warnings", "latency_ms", "stage_latencies_ms", "total_latency_ms", "stage_errors"):
-        if k in meta_in:
+        if isinstance(meta_in, dict) and k in meta_in:
             meta_out[k] = meta_in[k]
     return meta_out
 
@@ -247,162 +195,186 @@ def _ensure_warnings(meta: Dict[str, Any]) -> List[Dict[str, str]]:
     return meta["warnings"]
 
 
-# ----------------------------
-# Similarity + MMR (no extra deps)
-# ----------------------------
+def _ensure_stage_latencies(meta: Dict[str, Any]) -> Dict[str, int]:
+    v = meta.get("stage_latencies_ms")
+    if isinstance(v, dict):
+        return v
+    meta["stage_latencies_ms"] = {}
+    return meta["stage_latencies_ms"]
 
-_WORD_RE = re.compile(r"[\w]+", re.UNICODE)
 
-_STOP = {
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "of",
-    "to",
-    "in",
-    "on",
-    "for",
-    "with",
-    "by",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "as",
-    "at",
-    "from",
-    "that",
-    "this",
-    "it",
+# ----------------------------
+# Char-ngram semantic hashing (deterministic, no LLM)
+# ----------------------------
+def _compact(s: str) -> str:
+    out = []
+    for ch in (s or ""):
+        if ch.isalnum():
+            out.append(ch.lower())
+    return "".join(out)
+
+
+def _char_ngrams(s: str, n: int) -> List[str]:
+    if not s:
+        return []
+    if len(s) <= n:
+        return [s]
+    return [s[i : i + n] for i in range(len(s) - n + 1)]
+
+
+def _hash_embed_char_ngrams(text: str, *, dims: int = 1024, n: int = 3, salt: str = "det") -> List[float]:
+    s = _compact(text)
+    grams = _char_ngrams(s, n)
+    vec = [0.0] * dims
+    if not grams:
+        return vec
+
+    for g in grams:
+        h = hashlib.blake2b((salt + "\n" + g).encode("utf-8"), digest_size=8).digest()
+        x = int.from_bytes(h, "big", signed=False)
+        idx = x % dims
+        sign = -1.0 if (x & 1) else 1.0
+        vec[idx] += sign
+
+    norm = 0.0
+    for v in vec:
+        norm += v * v
+    if norm > 0.0:
+        inv = 1.0 / (norm ** 0.5)
+        vec = [v * inv for v in vec]
+    return vec
+
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    if not a or not b:
+        return 0.0
+    n = min(len(a), len(b))
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for i in range(n):
+        va = float(a[i])
+        vb = float(b[i])
+        dot += va * vb
+        na += va * va
+        nb += vb * vb
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return max(-1.0, min(1.0, dot / ((na ** 0.5) * (nb ** 0.5))))
+
+
+def _cos01(x: float) -> float:
+    return max(0.0, min(1.0, (float(x) + 1.0) * 0.5))
+
+
+def _serp_prior(rank: int) -> float:
+    r = max(1, int(rank))
+    return 1.0 / (1.0 + 0.10 * float(r - 1))
+
+
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3, "apr": 4, "april": 4, "may": 5,
+    "jun": 6, "june": 6, "jul": 7, "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 
 
-def _tokens(text: str) -> List[str]:
-    toks = [t.lower() for t in _WORD_RE.findall(text or "")]
-    out = []
-    for t in toks:
-        if len(t) <= 1:
-            continue
-        if t in _STOP:
-            continue
-        out.append(t)
-    return out
+def _age_to_days(age: Any) -> Optional[float]:
+    if age is None:
+        return None
+    s = str(age).strip().lower()
+    if not s:
+        return None
+
+    # "2 weeks ago"
+    parts = s.split()
+    if len(parts) >= 3 and parts[1].startswith(("day", "week", "month", "year")) and parts[2] == "ago":
+        try:
+            x = float(parts[0])
+        except Exception:
+            return None
+        unit = parts[1]
+        if unit.startswith("day"):
+            return x
+        if unit.startswith("week"):
+            return x * 7.0
+        if unit.startswith("month"):
+            return x * 30.0
+        if unit.startswith("year"):
+            return x * 365.0
+
+    # "April 27, 2020"
+    try:
+        m, dyy = s.split(" ", 1)
+        mon = _MONTHS.get(m)
+        if mon and "," in dyy:
+            day_str, year_str = dyy.split(",", 1)
+            day = int(day_str.strip())
+            yr = int(year_str.strip())
+            dt = datetime(yr, mon, day, tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
+    except Exception:
+        pass
+
+    return None
 
 
-def _tf(tokens: List[str]) -> Dict[str, float]:
-    d: Dict[str, float] = {}
-    for t in tokens:
-        d[t] = d.get(t, 0.0) + 1.0
-    return d
+def _freshness_score(age: Any) -> float:
+    d = _age_to_days(age)
+    if d is None:
+        return 0.35
+    if d <= 0:
+        return 1.0
+    return max(0.0, min(1.0, 1.0 / (1.0 + (d / 180.0))))
 
 
-def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
-    if not a or not b:
-        return 0.0
-    dot = 0.0
-    if len(a) > len(b):
-        a, b = b, a
-    for k, va in a.items():
-        vb = b.get(k)
-        if vb is not None:
-            dot += va * vb
-    na = sum(v * v for v in a.values()) ** 0.5
-    nb = sum(v * v for v in b.values()) ** 0.5
-    if na == 0.0 or nb == 0.0:
-        return 0.0
-    return max(0.0, min(1.0, dot / (na * nb)))
-
-
-def _mmr_select(
-    query_tf: Dict[str, float],
-    doc_tfs: Dict[str, Dict[str, float]],
-    rel: Dict[str, float],
-    *,
-    top_n: int,
-    mmr_lambda: float,
-) -> List[str]:
-    """Return doc_ids in selected order."""
-
-    lam = max(0.0, min(1.0, float(mmr_lambda)))
-    candidates = list(doc_tfs.keys())
-    if not candidates:
-        return []
-
-    selected: List[str] = []
-
-    first = max(candidates, key=lambda d: (rel.get(d, 0.0), d))
-    selected.append(first)
-    candidates.remove(first)
-
-    def sim(d1: str, d2: str) -> float:
-        return _cosine(doc_tfs.get(d1, {}), doc_tfs.get(d2, {}))
-
-    while candidates and len(selected) < top_n:
-        best_d = None
-        best_score = -1e9
-        for d in candidates:
-            r = rel.get(d, 0.0)
-            max_sim_to_selected = 0.0
-            for s in selected:
-                max_sim_to_selected = max(max_sim_to_selected, sim(d, s))
-            score = lam * r - (1.0 - lam) * max_sim_to_selected
-            if score > best_score or (
-                abs(score - best_score) < 1e-12 and (best_d is None or d < best_d)
-            ):
-                best_score = score
-                best_d = d
-        if best_d is None:
-            break
-        selected.append(best_d)
-        candidates.remove(best_d)
-
-    return selected
-
-
-# ----------------------------
-# Public entrypoint
-# ----------------------------
+@dataclass(frozen=True)
+class _Score:
+    score: float
+    sim: float
+    serp: float
+    fresh: float
 
 
 async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
-    """Step4 -> Step5: web search retrieval + simple MMR selection."""
-
     try:
         request_id = step4_out["request_id"]
         claim_id = step4_out["claim_id"]
         user_claim = step4_out["user_claim"]
         normalized_claim = step4_out["normalized_claim"]
-        roberta = step4_out["roberta"]
-        routing = step4_out["routing"]
-        query_plan = step4_out["query_plan"]
-        meta_in = step4_out["meta"]
+        roberta = step4_out.get("roberta")
+        routing = step4_out.get("routing") or {}
+        query_plan = step4_out.get("query_plan") or {}
+        meta_in = step4_out.get("meta") or {}
 
-        rag = routing["rag"]
-        M = int(rag["candidate_pool_size_m"])
-        N = int(rag["mmr_top_n"])
-        K = int(rag["final_top_k"])
-        mmr_lambda = float(rag.get("mmr_lambda", 0.7))
-        min_rel = float(rag.get("min_relevance", 0.25))
+        rag = (routing.get("rag") or {}) if isinstance(routing, dict) else {}
+        M = int(rag.get("candidate_pool_size_m") or 100)
+        N = int(rag.get("mmr_top_n") or 12)
+        K = int(rag.get("final_top_k") or 6)
+        min_rel = float(rag.get("min_relevance") or 0.25)
         allow_web = bool(rag.get("allow_web_search", True))
 
-        queries = list(query_plan["queries"])
+        queries = list(query_plan.get("queries") or [])
+        primary_q = str(query_plan.get("primary_query") or normalized_claim).strip() or normalized_claim
     except Exception as e:
         raise RAGRetrievalError("INVALID_INPUT", "Step5 expected Step4 output shape.", {"error": str(e)})
+
+    _assert_brave_only()
 
     t0 = time.perf_counter()
     meta_out = _copy_meta(meta_in)
     warnings = _ensure_warnings(meta_out)
+    stage_lat = _ensure_stage_latencies(meta_out)
 
-    prov = _provider()
+    # Clamp knobs
+    M = max(1, min(200, int(M)))
+    N = max(1, min(int(N), M))
+    K = max(1, min(int(K), N))
+    min_rel = max(0.0, min(1.0, float(min_rel)))
 
     if not allow_web:
         warnings.append({"code": "WEB_SEARCH_DISABLED", "message": "Routing disabled web search for this request."})
-        meta_out["latency_ms"] = int(round((time.perf_counter() - t0) * 1000))
+        stage_lat["step5_rag_retrieval"] = int(round((time.perf_counter() - t0) * 1000))
         return {
             "request_id": request_id,
             "claim_id": claim_id,
@@ -411,235 +383,214 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
             "roberta": roberta,
             "routing": routing,
             "query_plan": query_plan,
-            "retrieval": {
-                "provider": prov,
-                "skipped": True,
-                "candidates": [],
-                "mmr_selected": [],
-                "final": [],
-                "params": {
-                    "candidate_pool_size_m": M,
-                    "mmr_top_n": N,
-                    "final_top_k": K,
-                    "mmr_lambda": mmr_lambda,
-                    "min_relevance": min_rel,
-                },
-            },
+            "rag_candidates": {"provider": "brave", "params": {}, "items": [], "stats": {"fetched": 0, "kept": 0}},
             "meta": meta_out,
         }
 
-    # clamps
-    M = max(1, M)
-    N = max(1, min(N, M))
-    K = max(1, min(K, N))
-    min_rel = max(0.0, min(1.0, min_rel))
-    mmr_lambda = max(0.0, min(1.0, mmr_lambda))
+    # Embedding settings
+    emb_dims = _as_int(_env("RAG_EMB_DIMS"), 1024, 256, 4096)
+    emb_ngram = _as_int(_env("RAG_EMB_NGRAM"), 3, 2, 6)
 
-    items: List[Dict[str, Any]] = []
-    seen_url: set[str] = set()
+    # Query vector: average across planned queries (more robust than single string)
+    q_texts: List[str] = []
+    for qobj in queries:
+        q = str((qobj or {}).get("q") or "").strip()
+        if q:
+            q_texts.append(q)
+    if not q_texts:
+        q_texts = [primary_q]
 
-    primary_q = str(query_plan.get("primary_query") or normalized_claim)
+    q_vecs = [_hash_embed_char_ngrams(q, dims=emb_dims, n=emb_ngram, salt="det") for q in q_texts]
+    q_vec = [0.0] * emb_dims
+    for v in q_vecs:
+        for i in range(min(len(q_vec), len(v))):
+            q_vec[i] += float(v[i])
+    # normalize avg
+    norm = sum(x * x for x in q_vec) ** 0.5
+    if norm > 0:
+        q_vec = [x / norm for x in q_vec]
 
-    try:
-        if prov == "brave":
-            count = _coerce_int(_env("BRAVE_COUNT"), DEFAULT_BRAVE_COUNT, 1, 20)
-            safesearch = _env("BRAVE_SAFESEARCH")  # off|moderate|strict
-            country = _env("BRAVE_COUNTRY")  # e.g., CA
-            search_lang = _env("BRAVE_SEARCH_LANG")  # e.g., en
-            ui_lang = _env("BRAVE_UI_LANG")  # e.g., en-US
-            freshness = _env("BRAVE_FRESHNESS")  # pd|pw|pm|py|YYYY-MM-DDtoYYYY-MM-DD
-            extra_snippets = (_env("BRAVE_EXTRA_SNIPPETS") or "").strip().lower() in ("1", "true", "yes")
+    # Brave paging knobs
+    brave_count = _as_int(_env("BRAVE_COUNT"), 10, 1, 20)
+    brave_max_pages = _as_int(_env("BRAVE_MAX_PAGES"), 6, 1, 10)
 
-            async def fetch_one(q_text: str, variant: str, offset: int) -> bool:
-                nonlocal items, seen_url
-                data = await _brave_web_search(
-                    q=q_text,
-                    offset=offset,
-                    count=count,
-                    safesearch=safesearch,
-                    country=country,
-                    search_lang=search_lang,
-                    ui_lang=ui_lang,
-                    freshness=freshness,
-                    extra_snippets=extra_snippets,
-                )
-                got = (data.get("web") or {}).get("results") or []
-                for idx, it in enumerate(got):
-                    link = str(it.get("url") or "").strip()
-                    if not link or link in seen_url:
-                        continue
-                    seen_url.add(link)
-                    items.append(
-                        {
-                            "doc_id": _doc_id_from_url(link),
-                            "url": link,
-                            "title": str(it.get("title") or ""),
-                            "snippet": str(it.get("description") or ""),
-                            "displayLink": _domain_from_url(link),
-                            "source_query": q_text,
-                            "source_variant": variant,
-                            "serp_rank": int(offset) * int(count) + idx + 1,
-                            "age": it.get("age"),
-                        }
-                    )
-                    if len(items) >= M:
-                        break
+    timeout = _timeout_s()
+    limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+    items_raw: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    duplicates_dropped = 0
 
-                # use more_results_available if present
-                more = (data.get("query") or {}).get("more_results_available")
-                return bool(more) if more is not None else (len(got) >= count)
-
-            # 1) first page (offset=0) for each query
-            for qobj in queries:
-                if len(items) >= M:
-                    break
-                q_text = str(qobj.get("q") or "").strip()
-                variant = str(qobj.get("variant") or "")
-                if not q_text:
+    async with httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True) as client:
+        async def fetch_page(q_text: str, variant: str, offset: int) -> bool:
+            nonlocal duplicates_dropped
+            data = await _brave_web_search(
+                client,
+                q=q_text,
+                offset=offset,
+                count=brave_count,
+                safesearch=_env("BRAVE_SAFESEARCH"),
+                country=_env("BRAVE_COUNTRY"),
+                search_lang=_env("BRAVE_SEARCH_LANG"),
+                ui_lang=_env("BRAVE_UI_LANG"),
+                freshness=_env("BRAVE_FRESHNESS"),
+                extra_snippets=((_env("BRAVE_EXTRA_SNIPPETS") or "").strip().lower() in ("1", "true", "yes")),
+            )
+            got = (data.get("web") or {}).get("results") or []
+            for idx, it in enumerate(got):
+                url = str(it.get("url") or "").strip()
+                if not url:
                     continue
-                await fetch_one(q_text, variant, offset=0)
-
-            # 2) if still short, paginate primary query only (offset 1..9)
-            offset = 1
-            while len(items) < M and offset <= DEFAULT_BRAVE_OFFSET_MAX:
-                more = await fetch_one(primary_q, "original", offset=offset)
-                if not more:
-                    break
-                offset += 1
-
-        else:  # google_cse
-            num = _coerce_int(_env("GOOGLE_CSE_NUM"), DEFAULT_GOOGLE_NUM, 1, 10)
-            safe = _env("GOOGLE_CSE_SAFE")  # e.g., 'active'
-            lr = _env("GOOGLE_CSE_LR")  # e.g., 'lang_en'
-            gl = _env("GOOGLE_CSE_GL")  # e.g., 'ca'
-            date_restrict = _env("GOOGLE_CSE_DATE_RESTRICT")  # e.g., 'd30'
-
-            async def fetch_one(q_text: str, variant: str, start: int) -> None:
-                nonlocal items, seen_url
-                data = await _google_cse_list(
-                    q=q_text,
-                    start=start,
-                    num=num,
-                    safe=safe,
-                    lr=lr,
-                    gl=gl,
-                    date_restrict=date_restrict,
-                )
-                got = data.get("items") or []
-                for idx, it in enumerate(got):
-                    link = str(it.get("link") or "").strip()
-                    if not link or link in seen_url:
-                        continue
-                    seen_url.add(link)
-                    items.append(
-                        {
-                            "doc_id": _doc_id_from_url(link),
-                            "url": link,
-                            "title": str(it.get("title") or ""),
-                            "snippet": str(it.get("snippet") or ""),
-                            "displayLink": str(it.get("displayLink") or ""),
-                            "source_query": q_text,
-                            "source_variant": variant,
-                            "serp_rank": int(start) + idx,
-                        }
-                    )
-                    if len(items) >= M:
-                        break
-
-            for qobj in queries:
-                if len(items) >= M:
-                    break
-                q_text = str(qobj.get("q") or "").strip()
-                variant = str(qobj.get("variant") or "")
-                if not q_text:
+                canon = _canonicalize_url(url)
+                if canon in seen:
+                    duplicates_dropped += 1
                     continue
-                await fetch_one(q_text, variant, start=1)
+                seen.add(canon)
+                rank = int(offset) * int(brave_count) + idx + 1
+                items_raw.append(
+                    {
+                        "doc_id": _doc_id_from_url(canon),
+                        "url": canon,
+                        "title": str(it.get("title") or ""),
+                        "snippet": str(it.get("description") or ""),
+                        "domain": _domain_from_url(canon),
+                        "serp_rank": rank,
+                        "age": it.get("age"),
+                        "source_query": q_text,
+                        "source_variant": variant,
+                    }
+                )
+                if len(items_raw) >= M:
+                    break
 
-            start = 1 + num
-            while len(items) < M and start <= 91:  # start+num must be <= 100
-                await fetch_one(primary_q, "original", start=start)
-                start += num
+            more = (data.get("query") or {}).get("more_results_available")
+            if more is not None:
+                return bool(more)
+            return len(got) >= brave_count
 
-    except RAGRetrievalError:
-        raise
-    except Exception as e:
-        raise RAGRetrievalError("RETRIEVAL_UNEXPECTED", "Unexpected error during retrieval.", {"error": str(e)})
+        # 1) One page for each planned query
+        for qobj in queries:
+            if len(items_raw) >= M:
+                break
+            q_text = str((qobj or {}).get("q") or "").strip()
+            if not q_text:
+                continue
+            await fetch_page(q_text, str((qobj or {}).get("variant") or ""), offset=0)
 
-    if not items:
-        warnings.append({"code": "NO_SEARCH_RESULTS", "message": "Web search returned no results."})
+        # 2) Additional pages for primary query (fill up to M)
+        offset = 1
+        while len(items_raw) < M and offset < brave_max_pages:
+            more = await fetch_page(primary_q, "original", offset=offset)
+            if not more:
+                break
+            offset += 1
 
-    # Relevance scoring uses claim vs (title+snippet)
-    q_tf = _tf(_tokens(normalized_claim))
+    if not items_raw:
+        warnings.append({"code": "NO_SEARCH_RESULTS", "message": "Brave search returned no results."})
 
-    doc_tfs: Dict[str, Dict[str, float]] = {}
-    rel: Dict[str, float] = {}
+    # Scoring weights
+    w_sim = _as_float(_env("RAG_W_SIM"), 0.80, 0.0, 1.0)
+    w_serp = _as_float(_env("RAG_W_SERP"), 0.12, 0.0, 1.0)
+    w_fsh = _as_float(_env("RAG_W_FRESH"), 0.08, 0.0, 1.0)
+    sw = max(1e-9, w_sim + w_serp + w_fsh)
+    w_sim, w_serp, w_fsh = (w_sim / sw), (w_serp / sw), (w_fsh / sw)
 
-    for it in items:
-        doc_id = it["doc_id"]
-        text = f"{it.get('title','')} {it.get('snippet','')}"
-        tf = _tf(_tokens(text))
-        doc_tfs[doc_id] = tf
-        rel[doc_id] = _cosine(q_tf, tf)
+    # Score each candidate; use max(title_sim, snippet_sim) for robustness
+    scores: Dict[str, _Score] = {}
+    for it in items_raw:
+        did = str(it.get("doc_id") or "")
+        title = str(it.get("title") or "")
+        snippet = str(it.get("snippet") or "")
 
-    filtered = [it for it in items if rel.get(it["doc_id"], 0.0) >= min_rel]
-    if not filtered and items:
-        filtered = items[:]
-        warnings.append(
-            {"code": "MIN_RELEVANCE_TOO_HIGH", "message": "No candidates met min_relevance; kept unfiltered pool."}
+        t_vec = _hash_embed_char_ngrams(title, dims=emb_dims, n=emb_ngram, salt="det") if title else [0.0] * emb_dims
+        s_vec = _hash_embed_char_ngrams(snippet, dims=emb_dims, n=emb_ngram, salt="det") if snippet else [0.0] * emb_dims
+        sim = max(_cos01(_cosine(q_vec, t_vec)), _cos01(_cosine(q_vec, s_vec)))
+
+        serp = _serp_prior(int(it.get("serp_rank") or 10**9))
+        fresh = _freshness_score(it.get("age"))
+        score = max(0.0, min(1.0, (w_sim * sim) + (w_serp * serp) + (w_fsh * fresh)))
+        scores[did] = _Score(score=score, sim=sim, serp=serp, fresh=fresh)
+
+    # Threshold + adaptive keep (for MMR efficiency)
+    filtered = [it for it in items_raw if scores[str(it.get("doc_id") or "")].score >= min_rel]
+    target = min(len(items_raw), max(N * 3, K * 5, N))
+
+    if len(filtered) < min(N, len(items_raw)) and items_raw:
+        ranked = sorted(items_raw, key=lambda it: scores[str(it.get("doc_id") or "")].score, reverse=True)
+        filtered = ranked[:target]
+        warnings.append({"code": "MIN_SCORE_ADAPTIVE", "message": f"Adaptive cutoff used; kept top {len(filtered)} by score."})
+    elif len(filtered) > target:
+        filtered = sorted(filtered, key=lambda it: scores[str(it.get("doc_id") or "")].score, reverse=True)[:target]
+        warnings.append({"code": "POOL_TRIMMED", "message": f"Trimmed pool to {len(filtered)} for MMR efficiency."})
+
+    filtered.sort(key=lambda it: (-scores[str(it.get("doc_id") or "")].score, int(it.get("serp_rank") or 10**9)))
+
+    rag_items: List[Dict[str, Any]] = []
+    legacy_candidates: List[Dict[str, Any]] = []
+    for it in filtered:
+        did = str(it.get("doc_id") or "")
+        s = scores[did]
+        title = str(it.get("title") or "")
+        snippet = str(it.get("snippet") or "")
+        url = str(it.get("url") or "")
+        text = (title + " " + snippet).strip()
+
+        chunk_id = f"chunk_{did}"
+        breakdown = {"sim": float(s.sim), "serp": float(s.serp), "fresh": float(s.fresh)}
+
+        rag_items.append(
+            {
+                "chunk_id": chunk_id,
+                "text": text,
+                "score": float(s.score),
+                "score_breakdown": breakdown,
+                "doc": {
+                    "doc_id": did,
+                    "url": url,
+                    "title": title,
+                    "source": str(it.get("domain") or ""),
+                    "serp_rank": int(it.get("serp_rank") or 0),
+                    "age": it.get("age"),
+                    "source_query": str(it.get("source_query") or ""),
+                    "source_variant": str(it.get("source_variant") or ""),
+                },
+            }
         )
 
-    f_ids = {it["doc_id"] for it in filtered}
-    doc_tfs_f = {k: v for k, v in doc_tfs.items() if k in f_ids}
-    rel_f = {k: v for k, v in rel.items() if k in f_ids}
+        legacy_candidates.append(
+            {
+                "doc_id": did,
+                "url": url,
+                "title": title,
+                "snippet": snippet,
+                "displayLink": str(it.get("domain") or ""),
+                "source_query": str(it.get("source_query") or ""),
+                "source_variant": str(it.get("source_variant") or ""),
+                "serp_rank": int(it.get("serp_rank") or 0),
+                "age": it.get("age"),
+                "score": float(s.score),
+                "score_breakdown": breakdown,
+            }
+        )
 
-    selected_ids = _mmr_select(q_tf, doc_tfs_f, rel_f, top_n=min(N, len(doc_tfs_f)), mmr_lambda=mmr_lambda)
-    final_ids = selected_ids[: min(K, len(selected_ids))]
+    stage_lat["step5_rag_retrieval"] = int(round((time.perf_counter() - t0) * 1000))
 
-    by_id = {it["doc_id"]: it for it in filtered}
-
-    mmr_selected = []
-    for d in selected_ids:
-        it = by_id.get(d)
-        if it:
-            mmr_selected.append({**it, "relevance": rel_f.get(d, 0.0)})
-
-    final = []
-    for d in final_ids:
-        it = by_id.get(d)
-        if it:
-            final.append({**it, "relevance": rel_f.get(d, 0.0)})
-
-    step5_ms = int(round((time.perf_counter() - t0) * 1000))
-    meta_out["latency_ms"] = max(0, step5_ms)
-
-    provider_params: Dict[str, Any] = {
+    params: Dict[str, Any] = {
         "candidate_pool_size_m": M,
         "mmr_top_n": N,
         "final_top_k": K,
-        "mmr_lambda": mmr_lambda,
         "min_relevance": min_rel,
+        "provider": "brave",
+        "scoring": {"weights": {"sim": w_sim, "serp": w_serp, "fresh": w_fsh}},
+        "embedding": {"type": "char_ngram_hash", "dims": emb_dims, "ngram": emb_ngram},
+        "brave": {"count": brave_count, "max_pages": brave_max_pages},
     }
 
-    if prov == "brave":
-        provider_params["brave"] = {
-            "endpoint": _env("BRAVE_ENDPOINT", DEFAULT_BRAVE_ENDPOINT) or DEFAULT_BRAVE_ENDPOINT,
-            "count": _coerce_int(_env("BRAVE_COUNT"), DEFAULT_BRAVE_COUNT, 1, 20),
-            "safesearch": _env("BRAVE_SAFESEARCH"),
-            "country": _env("BRAVE_COUNTRY"),
-            "search_lang": _env("BRAVE_SEARCH_LANG"),
-            "ui_lang": _env("BRAVE_UI_LANG"),
-            "freshness": _env("BRAVE_FRESHNESS"),
-            "extra_snippets": (_env("BRAVE_EXTRA_SNIPPETS") or "").strip().lower() in ("1", "true", "yes"),
-        }
-    else:
-        provider_params["google"] = {
-            "endpoint": _env("GOOGLE_CSE_ENDPOINT", DEFAULT_GOOGLE_ENDPOINT) or DEFAULT_GOOGLE_ENDPOINT,
-            "num": _coerce_int(_env("GOOGLE_CSE_NUM"), DEFAULT_GOOGLE_NUM, 1, 10),
-            "safe": _env("GOOGLE_CSE_SAFE"),
-            "lr": _env("GOOGLE_CSE_LR"),
-            "gl": _env("GOOGLE_CSE_GL"),
-            "dateRestrict": _env("GOOGLE_CSE_DATE_RESTRICT"),
-        }
+    stats = {
+        "fetched": len(items_raw) + duplicates_dropped,
+        "kept": len(items_raw),
+        "duplicates_dropped": duplicates_dropped,
+        "filtered": len(filtered),
+    }
 
     return {
         "request_id": request_id,
@@ -649,20 +600,16 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
         "roberta": roberta,
         "routing": routing,
         "query_plan": query_plan,
+        "rag_candidates": {"provider": "brave", "params": params, "items": rag_items, "stats": stats},
+        # legacy passthrough (kept for compatibility if anything still reads it)
         "retrieval": {
-            "provider": prov,
+            "provider": "brave",
             "skipped": False,
-            "params": provider_params,
-            "candidates": [{**it, "relevance": rel.get(it["doc_id"], 0.0)} for it in filtered],
-            "mmr_selected": mmr_selected,
-            "final": final,
-            "stats": {
-                "fetched": len(items),
-                "deduped": len(items),
-                "filtered": len(filtered),
-                "mmr_selected": len(selected_ids),
-                "final": len(final_ids),
-            },
+            "params": params,
+            "candidates": legacy_candidates,
+            "mmr_selected": [],
+            "final": [],
+            "stats": stats,
         },
         "meta": meta_out,
     }
