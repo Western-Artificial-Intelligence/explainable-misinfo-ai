@@ -132,7 +132,8 @@ class DomainAdversarialClassifier(nn.Module):
         if label_3way is not None:
             mask_3 = (label_3way != -100)
             if mask_3.any():
-                loss_3 = F.cross_entropy(logits_label[mask_3], label_3way[mask_3])
+                weight = torch.tensor([1.4,1.7,1.0],device=device)
+                loss_3 = F.cross_entropy(logits_label[mask_3], label_3way[mask_3], weight=weight)
 
         # binary coarse loss
         loss_b = torch.tensor(0.0, device=device)

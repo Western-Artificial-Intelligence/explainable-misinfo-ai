@@ -104,8 +104,8 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
 
     # DataLoaders
     batch_size = int(config["training"]["batch_size"])
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,num_workers=4, pin_memory=True)
 
     # Model
     num_sources = len(set(train_ds["source_id"])) if len(train_ds) > 0 else 3
