@@ -1,0 +1,16 @@
+# Optional dependencies for advanced routes/features.
+# Install only if you need them:
+# pip install -r requirements-optional.txt
+
+# Explainability
+shap>=0.42.0
+lime>=0.2.0
+
+# Image processing / OCR
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
+
+# Audio processing (pulls numba/llvmlite)
+librosa>=0.10.0
+scipy>=1.11.0

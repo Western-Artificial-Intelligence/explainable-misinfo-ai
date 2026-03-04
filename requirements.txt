@@ -1,47 +1,28 @@
-# Core
+# Core model/training libs
 torch>=2.0.0
 transformers>=4.30.0,<5
 datasets>=2.0.0
 numpy>=1.24.0,<2
 scikit-learn>=1.3.0
 pandas>=2.0.0
-
-# Training
 peft
 pyyaml
 tqdm
 accelerate
-
-# Explainability
-shap>=0.42.0
-lime>=0.2.0
-
-# API
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-
-# UI
-streamlit>=1.28.0
-
-# Evaluation / Data
 evaluate
 kagglehub
+
+# API/runtime (required for local FastAPI + frontend integration)
 fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
 httpx
-# Image Processing & OCR
-opencv-python>=4.8.0
-pytesseract>=0.3.10
-Pillow>=10.0.0
-
-# Audio Processing
-librosa>=0.10.0
-scipy>=1.11.0
-
-# Security & Validation
 python-multipart>=0.0.6
 aiofiles>=23.2.0
+
+# UI
+streamlit>=1.28.0
+
+# Optional heavy dependencies (audio/image/explainability) are in:
+# requirements-optional.txt
