@@ -121,6 +121,28 @@ process_step7_output = _step8.process_step7_output
 ExplainabilitySHAPError = getattr(_step8, "ExplainabilitySHAPError", Exception)
 
 
+# ----------------------------
+# Load Step 9 (optional)
+# ----------------------------
+class _LLMSummarizationErrorPlaceholder(Exception):
+    """Placeholder when step 9 is not loaded; never raised."""
+
+LLMSummarizationError = _LLMSummarizationErrorPlaceholder
+_step9_path = _PIPELINE / "9_LLM_summarization" / "9_llm_summarization.py"
+if _step9_path.exists():
+    try:
+        _step9 = _load_module("step9_llm_summarization", _step9_path)
+        process_step8_output = _step9.process_step8_output
+        LLMSummarizationError = getattr(_step9, "LLMSummarizationError", _LLMSummarizationErrorPlaceholder)
+        _STEP9_AVAILABLE = True
+    except Exception:
+        process_step8_output = None
+        _STEP9_AVAILABLE = False
+else:
+    process_step8_output = None
+    _STEP9_AVAILABLE = False
+
+
 @router.post("/process")
 async def process(request: Request):
     body = await request.json()
@@ -147,6 +169,21 @@ async def process(request: Request):
         step7_out = await process_step6_output(step6_out)
         step8_out = await process_step7_output(step7_out)
 
+        if _STEP9_AVAILABLE and process_step8_output is not None:
+            try:
+                step9_out = await process_step8_output(step8_out)
+                return step9_out
+            except Exception as e:
+                if hasattr(e, "code"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": getattr(e, "code", "SUMMARY_ERROR"),
+                            "message": getattr(e, "message", str(e)),
+                            "details": getattr(e, "details", None),
+                        },
+                    )
+                raise HTTPException(status_code=500, detail=str(e))
         return step8_out
 
     except IngestClaimError as e:
@@ -172,6 +209,9 @@ async def process(request: Request):
 
     except ExplainabilitySHAPError as e:
         raise HTTPException(status_code=400, detail={"code": getattr(e, "code", "SHAP_ERROR"), "message": getattr(e, "message", str(e)), "details": getattr(e, "details", None)})
+
+    except LLMSummarizationError as e:
+        raise HTTPException(status_code=400, detail={"code": getattr(e, "code", "SUMMARY_ERROR"), "message": getattr(e, "message", str(e)), "details": getattr(e, "details", None)})
 
 
 class LLMTestRequest(BaseModel):
