@@ -1,6 +1,7 @@
 # Import FastAPI framework
 import os  # noqa: F401
 from pathlib import Path
+import logging
 
 from dotenv import load_dotenv
 
@@ -30,14 +31,56 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all HTTP methods: GET, POST, PUT, DELETE...
     allow_headers=["*"],  # Allow all HTTP headers (like content-type, authorization)
 )
-# Include routers
 app.include_router(health.router)
 app.include_router(classify.router)
-app.include_router(production.router, prefix="/api")
-# app.include_router(ollama_blackboxes.router, prefix="/api/ollama")
+app.include_router(documents.router)
+
+# Audio extraction and voice-to-text route
+try:
+    from .routes import audio
+    app.include_router(audio.router)
+except (ModuleNotFoundError, ImportError) as exc:
+    logger.warning(
+        "Skipping /api/audio routes because dependency is missing: %s. "
+        "Install optional audio deps to enable it.",
+        getattr(exc, "name", exc),
+    )
+
+# Image processing and OCR route
+try:
+    from .routes import imageprocessing
+    app.include_router(imageprocessing.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/image routes because dependency is missing: %s. "
+        "Install optional image processing deps to enable it.",
+        exc.name,
+    )
+
+# Unified production pipeline route
+try:
+    from .routes import pipeline
+    app.include_router(pipeline.router)
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api/pipeline routes because dependency is missing: %s. "
+        "Install optional deps to enable it.",
+        exc.name,
+    )
+
+# Production route is optional because it relies on extra dependencies.
+try:
+    from .routes import production
+except ModuleNotFoundError as exc:
+    logger.warning(
+        "Skipping /api production routes because dependency is missing: %s. "
+        "Install optional deps to enable it.",
+        exc.name,
+    )
+else:
+    app.include_router(production.router, prefix="/api")
 
 
-# simple endpoint to verify the server is running
 @app.get("/")
 def root():
     return {"message": "TruthLens backend running!"}

@@ -1,6 +1,7 @@
 # 2_roberta_inference.py
 from __future__ import annotations
 
+import logging
 import hashlib
 import importlib.util
 import json
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 LABELS_3WAY = ["false", "mixed", "true"]
 LABEL2ID = {name: i for i, name in enumerate(LABELS_3WAY)}
@@ -45,6 +48,13 @@ ROBERTA_MIN_CONFIDENCE = _get_min_confidence()
 
 EPS = 1e-9
 
+# Try to import real model inference
+try:
+    from api.services.model_inference import is_model_available, predict as _real_predict
+    _HAS_REAL_MODEL = True
+except ImportError:
+    _HAS_REAL_MODEL = False
+
 
 class RobertaInferenceError(Exception):
     def __init__(self, code: str, message: str, details: Optional[Dict[str, Any]] = None):
@@ -68,7 +78,6 @@ def _softmax(logits: List[float]) -> List[float]:
 
 
 def _argmax_eps(vals: List[float]) -> int:
-    # deterministic tie-break: earliest index within EPS of max
     m = max(vals)
     for i, v in enumerate(vals):
         if abs(v - m) <= EPS:
@@ -344,6 +353,10 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
 
     x = _build_model_text(normalized_claim)
     tok = _BACKEND.tokenize(x)
+
+    # Estimate token count for metadata
+    input_tokens = len(x.split())
+    truncated = input_tokens > T_CONFIG
 
     # Time the inference (eval lookup, override, debug, or backend) so latency_ms and stage_latencies_ms are correct
     t0 = time.perf_counter()

@@ -270,3 +270,29 @@ git push origin
 ## Risks / Rollback
 -
 ```
+# Terminal 1: backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
+pip install fastapi "uvicorn[standard]" python-dotenv pydantic
+uvicorn api.main:app --reload
+http://127.0.0.1:8000
+
+
+# Terminal 2: frontend
+cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai/frontend
+npm install
+npm run dev
+
+# Test
+curl -X POST "http://127.0.0.1:8000/classify" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Is AI dangerous?"}'
+
+Frontend notes:
+1. needs a Navbar and a homepage just like an actual website
+2. Change the prediction texts to True/False or Mixed.
+3. Include a button that links to our chrome extension
+4. UI changes for the button on the chrome extension
+5. Change the favicon for the chrome extension

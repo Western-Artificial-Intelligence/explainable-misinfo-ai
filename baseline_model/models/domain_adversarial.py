@@ -55,9 +55,10 @@ class DomainAdversarialClassifier(nn.Module):
     def __init__(self, backbone_name: str = "roberta-base", num_sources: int = 3, lambda_adv: float = 0.5):
         super().__init__()
 
-        # Encoder
+        # Encoder (works for both hub models like "roberta-base" and local paths like "./models/mlm/roberta-misinfo-mlm")
         self.config = AutoConfig.from_pretrained(backbone_name)
         self.encoder = AutoModel.from_pretrained(backbone_name, config=self.config)
+
         hidden = self.config.hidden_size  # usually 768 for roberta-base
 
         # Label head (3-way)

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TruthLens</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="tlx-popup-body">
+    <div class="tlx-popup">
+      <header class="tlx-popup-header">
+        <div class="tlx-logo" aria-hidden="true">TL</div>
+        <div>
+          <h1>TruthLens</h1>
+          <p>AI-powered real-time misinformation detection</p>
+        </div>
+      </header>
+
+      <section class="tlx-section">
+        <h2>Video Transcription (Voice-to-Text)</h2>
+        <p class="tlx-muted">Play a video on the current page, then click below to capture and transcribe audio.</p>
+        <div class="tlx-actions-row">
+          <button id="startAudioBtn" class="tlx-btn tlx-btn-primary">Start Audio Capture</button>
+          <button id="stopAudioBtn" class="tlx-btn tlx-btn-outline tlx-hidden">Stop & Transcribe</button>
+        </div>
+        <p id="audioStatus" class="tlx-muted"></p>
+        <div id="transcriptionResult" class="tlx-result-box tlx-hidden"></div>
+      </section>
+
+      <section class="tlx-section">
+        <h2>Image & Text Capture (No Voice)</h2>
+        <p class="tlx-muted">For videos with minimal audio: captures frames and text overlays for analysis.</p>
+        <div class="tlx-actions-row">
+          <button id="autoDetectCaptureBtn" class="tlx-btn tlx-btn-primary">Auto-Detect & Start</button>
+          <button id="startImageCaptureBtn" class="tlx-btn tlx-btn-secondary">Force Image Capture</button>
+          <button id="stopImageCaptureBtn" class="tlx-btn tlx-btn-outline tlx-hidden">Stop & Analyze</button>
+        </div>
+        <p id="imageStatus" class="tlx-muted"></p>
+        <div id="imageAnalysisResult" class="tlx-result-box tlx-hidden"></div>
+      </section>
+
+      <section class="tlx-section">
+        <p class="tlx-muted">Highlight text on the page, then click below or right-click and choose “Analyze with TruthLens”.</p>
+        <button id="analyzeSelectionBtn" class="tlx-btn tlx-btn-primary">Analyze Selected Text</button>
+        <div id="selectionResult" class="tlx-result-box tlx-hidden"></div>
+      </section>
+
+      <section class="tlx-section">
+        <h2>Analyze Entire Page</h2>
+        <div class="tlx-actions-row">
+          <button id="analyzePageBtn" class="tlx-btn tlx-btn-primary">Analyze This Page</button>
+          <button id="toggleOverlayBtn" class="tlx-btn tlx-btn-outline">Remove Overlays</button>
+        </div>
+        <p id="pageStatus" class="tlx-muted"></p>
+      </section>
+
+      <section class="tlx-section">
+        <h2>Upload Document</h2>
+        <input id="fileInput" class="tlx-input" type="file" accept=".txt,.pdf,.docx" />
+        <textarea id="manualTextInput" class="tlx-textarea" rows="5" placeholder="Paste text here (optional, merges with file text)..."></textarea>
+        <button id="analyzeDocumentBtn" class="tlx-btn tlx-btn-primary">Analyze Document</button>
+        <p id="documentStatus" class="tlx-muted"></p>
+        <div id="documentResults" class="tlx-document-results"></div>
+      </section>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
+
