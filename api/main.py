@@ -3,6 +3,8 @@ import os  # noqa: F401
 from pathlib import Path
 import logging
 
+logger = logging.getLogger(__name__)
+
 from dotenv import load_dotenv
 
 # Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
@@ -15,7 +17,7 @@ else:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import classify, health, production
+from .routes import classify, documents, health, production
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
