@@ -289,3 +289,10 @@ npm run dev
 curl -X POST "http://127.0.0.1:8000/classify" \
   -H "Content-Type: application/json" \
   -d '{"text":"Is AI dangerous?"}'
+
+Frontend notes:
+1. needs a Navbar and a homepage just like an actual website
+2. Change the prediction texts to True/False or Mixed.
+3. Include a button that links to our chrome extension
+4. UI changes for the button on the chrome extension
+5. Change the favicon for the chrome extension
