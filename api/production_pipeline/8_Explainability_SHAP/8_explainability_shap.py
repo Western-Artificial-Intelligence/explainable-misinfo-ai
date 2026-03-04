@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ExplainabilitySHAPError(Exception):
@@ -40,6 +40,12 @@ TOPK_TOKENS = max(1, min(64, TOPK_TOKENS))
 
 FALLBACK_MAX_SEGMENTS = int((os.getenv("EXPLAIN_MAX_SEGMENTS", "8") or "8").strip() or "8")
 FALLBACK_MAX_SEGMENTS = max(1, min(24, FALLBACK_MAX_SEGMENTS))
+
+# Number of RAG evidence items (by highest similarity) to include in SHAP explanation.
+SHAP_TOP_EVIDENCE_N = int((os.getenv("EXPLAIN_TOP_EVIDENCE_N", "2") or "2").strip() or "2")
+SHAP_TOP_EVIDENCE_N = max(0, min(10, SHAP_TOP_EVIDENCE_N))
+
+_SEP = " [SEP] "
 
 
 # ----------------------------
@@ -79,6 +85,61 @@ def _mark_latency(meta: Dict[str, Any], stage_name: str, ms: int) -> None:
         meta["total_latency_ms"] = int(sum(int(v) for v in sl.values() if isinstance(v, (int, float))))
     except Exception:
         pass
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags for cleaner SHAP segments."""
+    if not text:
+        return ""
+    return re.sub(r"<[^>]+>", "", str(text)).strip()
+
+
+def _get_top_evidence_by_similarity(step7_out: Dict[str, Any], top_n: int) -> List[Dict[str, Any]]:
+    """
+    From RAG web search results, return the top N items with highest similarity (sim).
+    Uses rag_candidates.items or mmr_selected.items; each item must have score_breakdown.sim.
+    Returns list of dicts with keys: text, sim, chunk_id, doc (optional).
+    """
+    if top_n <= 0:
+        return []
+    items_with_sim: List[Tuple[float, Dict[str, Any]]] = []
+
+    def _collect(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            breakdown = it.get("score_breakdown") or {}
+            sim = breakdown.get("sim")
+            if sim is None:
+                sim = it.get("retrieval_score") or it.get("score") or 0.0
+            try:
+                sim_f = float(sim)
+            except (TypeError, ValueError):
+                continue
+            text = (it.get("text") or "").strip()
+            if not text:
+                continue
+            items_with_sim.append((sim_f, {"text": _strip_html(text), "sim": sim_f, "chunk_id": it.get("chunk_id"), "doc": it.get("doc")}))
+
+    rag = step7_out.get("rag_candidates") or {}
+    mmr = step7_out.get("mmr_selected") or {}
+    _collect(rag.get("items"))
+    _collect(mmr.get("items"))
+
+    items_with_sim.sort(key=lambda x: (-x[0], x[1].get("chunk_id") or ""))
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for _, rec in items_with_sim:
+        key = (rec.get("chunk_id"), rec.get("text", "")[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(rec)
+        if len(out) >= top_n:
+            break
+    return out
 
 
 # ----------------------------
@@ -256,9 +317,16 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
     if class_id not in (0, 1, 2):
         class_id = 0
 
-    # base/output in probability space
+    # Top RAG evidence by similarity: use for SHAP when available
+    top_evidence = _get_top_evidence_by_similarity(step7_out, SHAP_TOP_EVIDENCE_N) if SHAP_TOP_EVIDENCE_N else []
+    if top_evidence:
+        explain_text = normalized_claim + _SEP + _SEP.join(e["text"] for e in top_evidence)
+    else:
+        explain_text = normalized_claim
+
+    # base/output in probability space (use explain_text so output reflects claim + evidence when used)
     base_probs = _infer_logits_probs("")["probs"]
-    out_probs = _infer_logits_probs(normalized_claim)["probs"]
+    out_probs = _infer_logits_probs(explain_text)["probs"]
     base_value = float(base_probs[class_id]) if len(base_probs) >= 3 else 0.0
     output_value = float(out_probs[class_id]) if len(out_probs) >= 3 else 0.0
 
@@ -276,7 +344,7 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
             explainer = shap.Explainer(f, masker, algorithm=SHAP_ALGO)
 
             start_ms = time.perf_counter()
-            exp = _call_explainer(explainer, [normalized_claim])
+            exp = _call_explainer(explainer, [explain_text])
             shap_ms = int(round((time.perf_counter() - start_ms) * 1000))
 
             tokens = list(exp.data[0])
@@ -297,7 +365,7 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
                 except Exception:
                     out_v = None
 
-            spans = _safe_token_spans([str(t) for t in tokens], normalized_claim)
+            spans = _safe_token_spans([str(t) for t in tokens], explain_text)
 
             tok_out: List[Dict[str, Any]] = []
             for i, tok in enumerate(tokens):
@@ -307,12 +375,20 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
                 tok_out.append(rec)
 
             if not tok_out:
-                tok_out = [{"i": 0, "token": normalized_claim, "shap_value": 0.0}]
+                tok_out = [{"i": 0, "token": explain_text, "shap_value": 0.0}]
 
             k = max(1, min(TOPK_TOKENS, len(tok_out)))
             raw_vals = [float(x["shap_value"]) for x in tok_out]
             top_pos = _argsort_desc(raw_vals)[:k]
             top_neg = _argsort_asc(raw_vals)[:k]
+
+            shap_meta: Dict[str, Any] = {"requested_samples": int(SHAP_NSAMPLES), "time_ms": int(shap_ms)}
+            if top_evidence:
+                shap_meta["evidence_used"] = [
+                    {"chunk_id": e.get("chunk_id"), "sim": e.get("sim"), "doc": e.get("doc")}
+                    for e in top_evidence
+                ]
+                shap_meta["explained_text_source"] = "claim_plus_top_evidence_by_sim"
 
             shap_explainability = {
                 "method": f"shap_{SHAP_ALGO}",
@@ -322,7 +398,7 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
                 "output_space": SHAP_OUTPUT_SPACE,
                 "tokens": tok_out,
                 "top_tokens": {"k": int(k), "positive": list(map(int, top_pos)), "negative": list(map(int, top_neg))},
-                "meta": {"requested_samples": int(SHAP_NSAMPLES), "time_ms": int(shap_ms)},
+                "meta": shap_meta,
             }
         except Exception as e:
             stage_errors.append(
@@ -341,15 +417,15 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
         SHAP_ENABLED_LOCAL = False
 
     if not SHAP_ENABLED_LOCAL:
-        spans = _segment_word_spans(normalized_claim, max_segments=FALLBACK_MAX_SEGMENTS)
+        spans = _segment_word_spans(explain_text, max_segments=FALLBACK_MAX_SEGMENTS)
         contribs: List[float] = []
         seg_out: List[Dict[str, Any]] = []
 
-        full = _infer_logits_probs(normalized_claim)["probs"]
+        full = _infer_logits_probs(explain_text)["probs"]
         full_v = float(full[class_id]) if len(full) >= 3 else 0.0
 
         for i, sp in enumerate(spans):
-            masked = _mask_span(normalized_claim, sp["start"], sp["end"])
+            masked = _mask_span(explain_text, sp["start"], sp["end"])
             p = _infer_logits_probs(masked)["probs"]
             pv = float(p[class_id]) if len(p) >= 3 else 0.0
             val = float(full_v - pv)
@@ -358,7 +434,7 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
                 {
                     "i": int(i),
                     "span": {"start": int(sp["start"]), "end": int(sp["end"])},
-                    "text": normalized_claim[sp["start"] : sp["end"]],
+                    "text": explain_text[sp["start"] : sp["end"]],
                     "value": float(val),
                 }
             )
@@ -366,6 +442,14 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
         k = max(1, min(TOPK_TOKENS, len(seg_out)))
         top_pos = _argsort_desc(contribs)[:k]
         top_neg = _argsort_asc(contribs)[:k]
+
+        fallback_meta: Dict[str, Any] = {"max_segments": int(FALLBACK_MAX_SEGMENTS)}
+        if top_evidence:
+            fallback_meta["evidence_used"] = [
+                {"chunk_id": e.get("chunk_id"), "sim": e.get("sim"), "doc": e.get("doc")}
+                for e in top_evidence
+            ]
+            fallback_meta["explained_text_source"] = "claim_plus_top_evidence_by_sim"
 
         shap_explainability = {
             "method": "word_span_occlusion",
@@ -375,7 +459,7 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
             "output_space": "probability",
             "segments": seg_out,
             "top_segments": {"k": int(k), "positive": list(map(int, top_pos)), "negative": list(map(int, top_neg))},
-            "meta": {"max_segments": int(FALLBACK_MAX_SEGMENTS)},
+            "meta": fallback_meta,
         }
 
     _mark_latency(meta_out, "8_Explainability_SHAP", int(round((time.perf_counter() - t0) * 1000)))
