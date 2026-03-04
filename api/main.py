@@ -1,16 +1,20 @@
 # Import FastAPI framework
 import os  # noqa: F401
+from pathlib import Path
 
-# allows your Python app to read environment variables from a
 from dotenv import load_dotenv
+
+# Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.is_file():
+    load_dotenv(_env_path, override=False)
+else:
+    load_dotenv()
+
 from fastapi import FastAPI
-# Import CORS middleware to allow frontend requests from other origins
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import endpoint routers from other files (modular structure)
 from .routes import classify, health, production
-
-load_dotenv()
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")

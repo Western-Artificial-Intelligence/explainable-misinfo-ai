@@ -1,7 +1,9 @@
 # 5_rag_retrieval.py
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -158,22 +160,39 @@ async def _brave_web_search(
         "Cache-Control": "no-cache",
     }
 
-    try:
-        r = await client.get(endpoint, params=params, headers=headers)
-    except httpx.TimeoutException as e:
-        # Per your requirement: return/propagate error (no fallback)
-        raise RAGRetrievalError("BRAVE_TIMEOUT", "Brave Search request timed out.", {"error": str(e)})
-    except httpx.RequestError as e:
-        raise RAGRetrievalError("BRAVE_CONNECTION", "Could not reach Brave Search endpoint.", {"error": str(e)})
+    retry_429_max = _as_int(_env("BRAVE_RETRY_429_MAX"), 2, 0, 10)
+    retry_429_base_delay_s = _as_float(_env("BRAVE_RETRY_429_BASE_DELAY_S"), 1.0, 0.0, 60.0)
+    attempt = 0
 
-    if r.status_code != 200:
+    while True:
+        try:
+            r = await client.get(endpoint, params=params, headers=headers)
+        except httpx.TimeoutException as e:
+            raise RAGRetrievalError("BRAVE_TIMEOUT", "Brave Search request timed out.", {"error": str(e)})
+        except httpx.RequestError as e:
+            raise RAGRetrievalError("BRAVE_CONNECTION", "Could not reach Brave Search endpoint.", {"error": str(e)})
+
+        if r.status_code == 200:
+            return r.json()
+
+        if r.status_code == 429 and attempt < retry_429_max and retry_429_base_delay_s > 0:
+            retry_after = (r.headers.get("Retry-After") or "").strip()
+            delay_s = retry_429_base_delay_s * (2.0 ** float(attempt))
+            try:
+                if retry_after:
+                    delay_s = max(delay_s, float(retry_after))
+            except Exception:
+                pass
+            delay_s = max(0.0, min(60.0, float(delay_s)))
+            attempt += 1
+            await asyncio.sleep(delay_s)
+            continue
+
         raise RAGRetrievalError(
             "BRAVE_BAD_STATUS",
             f"Brave Search returned HTTP {r.status_code}.",
             {"status_code": r.status_code, "body": r.text[:2000]},
         )
-
-    return r.json()
 
 
 # ----------------------------
@@ -201,6 +220,50 @@ def _ensure_stage_latencies(meta: Dict[str, Any]) -> Dict[str, int]:
         return v
     meta["stage_latencies_ms"] = {}
     return meta["stage_latencies_ms"]
+
+
+def _ensure_stage_errors(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
+    v = meta.get("stage_errors")
+    if isinstance(v, list):
+        return v
+    meta["stage_errors"] = []
+    return meta["stage_errors"]
+
+
+def _fail_open_brave_errors() -> bool:
+    return ((_env("RAG_FAIL_OPEN", "true") or "true").strip().lower() in ("1", "true", "yes"))
+
+
+def _brave_error_reason_from_details(details: Dict[str, Any]) -> Optional[str]:
+    """
+    Parse Brave API error body from details (e.g. from RAGRetrievalError.details)
+    and return a short user-facing reason, or None if unparseable.
+    """
+    body = details.get("body")
+    if not isinstance(body, str) or not body.strip():
+        return None
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    err = (data or {}).get("error")
+    if not isinstance(err, dict):
+        return None
+    detail = (err.get("detail") or "").strip()
+    code = (err.get("code") or "").strip().upper()
+    meta = err.get("meta") if isinstance(err.get("meta"), dict) else {}
+    limit_type = (meta.get("usage_limit_type") or "").strip().lower()
+    if code == "USAGE_LIMIT_EXCEEDED" and detail:
+        if limit_type == "monthly":
+            return "usage limit exceeded (monthly cap reached)."
+        if limit_type:
+            return f"usage limit exceeded ({limit_type})."
+        return detail.rstrip(".") + "." if detail else "usage limit exceeded."
+    if detail:
+        return detail.rstrip(".") + "." if not detail.endswith(".") else detail
+    if code:
+        return code.replace("_", " ").lower() + "."
+    return None
 
 
 # ----------------------------
@@ -352,14 +415,12 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
         N = int(rag.get("mmr_top_n") or 12)
         K = int(rag.get("final_top_k") or 6)
         min_rel = float(rag.get("min_relevance") or 0.25)
-        allow_web = bool(rag.get("allow_web_search", True))
+        allow_web = (_env("RAG_ALLOW_WEB_SEARCH", "1") or "1").strip().lower() in ("1", "true", "yes")
 
         queries = list(query_plan.get("queries") or [])
         primary_q = str(query_plan.get("primary_query") or normalized_claim).strip() or normalized_claim
     except Exception as e:
         raise RAGRetrievalError("INVALID_INPUT", "Step5 expected Step4 output shape.", {"error": str(e)})
-
-    _assert_brave_only()
 
     t0 = time.perf_counter()
     meta_out = _copy_meta(meta_in)
@@ -373,7 +434,7 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
     min_rel = max(0.0, min(1.0, float(min_rel)))
 
     if not allow_web:
-        warnings.append({"code": "WEB_SEARCH_DISABLED", "message": "Routing disabled web search for this request."})
+        warnings.append({"code": "WEB_SEARCH_DISABLED", "message": "Web search disabled (RAG_ALLOW_WEB_SEARCH=0); using LLM-only RAG."})
         stage_lat["step5_rag_retrieval"] = int(round((time.perf_counter() - t0) * 1000))
         return {
             "request_id": request_id,
@@ -419,22 +480,30 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
     items_raw: List[Dict[str, Any]] = []
     seen: Set[str] = set()
     duplicates_dropped = 0
+    brave_error: Optional[RAGRetrievalError] = None
 
     async with httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True) as client:
         async def fetch_page(q_text: str, variant: str, offset: int) -> bool:
             nonlocal duplicates_dropped
-            data = await _brave_web_search(
-                client,
-                q=q_text,
-                offset=offset,
-                count=brave_count,
-                safesearch=_env("BRAVE_SAFESEARCH"),
-                country=_env("BRAVE_COUNTRY"),
-                search_lang=_env("BRAVE_SEARCH_LANG"),
-                ui_lang=_env("BRAVE_UI_LANG"),
-                freshness=_env("BRAVE_FRESHNESS"),
-                extra_snippets=((_env("BRAVE_EXTRA_SNIPPETS") or "").strip().lower() in ("1", "true", "yes")),
-            )
+            nonlocal brave_error
+            try:
+                data = await _brave_web_search(
+                    client,
+                    q=q_text,
+                    offset=offset,
+                    count=brave_count,
+                    safesearch=_env("BRAVE_SAFESEARCH"),
+                    country=_env("BRAVE_COUNTRY"),
+                    search_lang=_env("BRAVE_SEARCH_LANG"),
+                    ui_lang=_env("BRAVE_UI_LANG"),
+                    freshness=_env("BRAVE_FRESHNESS"),
+                    extra_snippets=((_env("BRAVE_EXTRA_SNIPPETS") or "").strip().lower() in ("1", "true", "yes")),
+                )
+            except RAGRetrievalError as e:
+                if _fail_open_brave_errors():
+                    brave_error = e
+                    return False
+                raise
             got = (data.get("web") or {}).get("results") or []
             for idx, it in enumerate(got):
                 url = str(it.get("url") or "").strip()
@@ -471,6 +540,8 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
         for qobj in queries:
             if len(items_raw) >= M:
                 break
+            if brave_error is not None:
+                break
             q_text = str((qobj or {}).get("q") or "").strip()
             if not q_text:
                 continue
@@ -478,11 +549,76 @@ async def process_step4_output(step4_out: Dict[str, Any]) -> Dict[str, Any]:
 
         # 2) Additional pages for primary query (fill up to M)
         offset = 1
-        while len(items_raw) < M and offset < brave_max_pages:
+        while len(items_raw) < M and offset < brave_max_pages and brave_error is None:
             more = await fetch_page(primary_q, "original", offset=offset)
             if not more:
                 break
             offset += 1
+
+    if brave_error is not None:
+        stage_errors = _ensure_stage_errors(meta_out)
+        stage_errors.append(
+            {
+                "stage": "step5_rag_retrieval",
+                "code": getattr(brave_error, "code", "BRAVE_ERROR"),
+                "message": getattr(brave_error, "message", str(brave_error)),
+                "details": getattr(brave_error, "details", None),
+            }
+        )
+
+        details = getattr(brave_error, "details", None) or {}
+        status = details.get("status_code")
+        brave_reason = _brave_error_reason_from_details(details)
+        if brave_reason:
+            msg = f"Web retrieval skipped: Brave Search — {brave_reason}"
+        else:
+            hint = ""
+            if status == 402:
+                hint = " (likely out of credits / plan issue)"
+            elif status == 429:
+                hint = " (rate limited)"
+            msg = f"Web retrieval skipped because Brave Search failed{hint}."
+
+        warnings.append(
+            {
+                "code": f"BRAVE_HTTP_{status}" if status is not None else getattr(brave_error, "code", "BRAVE_ERROR"),
+                "message": msg,
+            }
+        )
+
+        stage_lat["step5_rag_retrieval"] = int(round((time.perf_counter() - t0) * 1000))
+        params: Dict[str, Any] = {
+            "candidate_pool_size_m": M,
+            "mmr_top_n": N,
+            "final_top_k": K,
+            "min_relevance": min_rel,
+            "provider": "brave",
+            "embedding": {"type": "char_ngram_hash", "dims": emb_dims, "ngram": emb_ngram},
+            "brave": {"count": brave_count, "max_pages": brave_max_pages},
+        }
+        stats = {"fetched": 0, "kept": 0, "duplicates_dropped": 0, "filtered": 0}
+
+        return {
+            "request_id": request_id,
+            "claim_id": claim_id,
+            "user_claim": user_claim,
+            "normalized_claim": normalized_claim,
+            "roberta": roberta,
+            "routing": routing,
+            "query_plan": query_plan,
+            "rag_candidates": {"provider": "brave", "params": params, "items": [], "stats": stats},
+            # legacy passthrough (kept for compatibility if anything still reads it)
+            "retrieval": {
+                "provider": "brave",
+                "skipped": True,
+                "params": params,
+                "candidates": [],
+                "mmr_selected": [],
+                "final": [],
+                "stats": stats,
+            },
+            "meta": meta_out,
+        }
 
     if not items_raw:
         warnings.append({"code": "NO_SEARCH_RESULTS", "message": "Brave search returned no results."})

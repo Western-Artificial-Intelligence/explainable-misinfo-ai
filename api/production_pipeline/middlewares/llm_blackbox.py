@@ -74,16 +74,31 @@ def _auth_headers_for_base_url(base_url: str) -> Dict[str, str]:
 
 
 def _extract_text(resp_json: Dict[str, Any]) -> str:
-    # /api/chat (non-stream) typically returns {"message": {"content": "..."}}
+    # Ollama /api/chat: {"message": {"role": "assistant", "content": "...", "thinking": "..."}}
+    # Some models (e.g. thinking/CoT) put output in "thinking" and leave "content" empty.
     msg = resp_json.get("message")
     if isinstance(msg, dict):
         content = msg.get("content")
-        if isinstance(content, str):
+        if content is not None and isinstance(content, str) and content.strip():
             return content
+        thinking = msg.get("thinking")
+        if thinking is not None and isinstance(thinking, str) and thinking.strip():
+            return thinking
 
-    # Some setups might return {"response": "..."} (e.g., /api/generate)
+    # OpenAI-style: {"choices": [{"message": {"content": "..."}}]}
+    choices = resp_json.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            m = first.get("message") or first.get("delta")
+            if isinstance(m, dict):
+                c = m.get("content")
+                if c is not None and isinstance(c, str):
+                    return c
+
+    # /api/generate: {"response": "..."}
     content2 = resp_json.get("response")
-    if isinstance(content2, str):
+    if content2 is not None and isinstance(content2, str):
         return content2
 
     raise LLMBlackboxError(
@@ -180,7 +195,12 @@ class LLMBlackbox:
                         )
 
                     data = r.json()
-                    return _extract_text(data).strip()
+                    out = _extract_text(data).strip()
+                    if not out and os.getenv("ROBERTA_LLM_DEBUG_RESPONSE", "").strip().lower() in ("1", "true", "yes"):
+                        print("[llm_blackbox] empty response; raw keys:", list(data.keys()), flush=True)
+                        if "message" in data and isinstance(data["message"], dict):
+                            print("[llm_blackbox] message keys:", list(data["message"].keys()), flush=True)
+                    return out
 
                 except (httpx.TimeoutException, httpx.TransportError, LLMBlackboxError) as e:
                     last_err = e
