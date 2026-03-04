@@ -1,0 +1,11 @@
+{
+    "request_id": "db5e8cf4-9d87-47ef-acc3-841df905015b",
+    "claim_id": "claim_701bbbec499e7a2849b9f32ef4fdb6e3de06afa4b2dc0870566d9f77792c6efb",
+    "user_claim": "Kimjeongeun is dead",
+    "normalized_claim": "Kimjeongeun is dead",
+    "meta": {
+        "received_at": "2026-03-03T20:52:31.460153Z",
+        "version": "dev",
+        "normalization_version": "norm_v1"
+    }
+}

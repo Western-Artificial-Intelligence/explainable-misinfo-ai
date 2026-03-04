@@ -1,46 +1,12 @@
 # 4_query_building.py
 from __future__ import annotations
 
+import importlib.util
+import os
 import re
 import time
-import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import hashlib
-
-# ---- load Ollama blackbox by path (works even with file-loaded steps) ----
-_OLLAMA_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "middlewares"
-    / "ollama_blackbox.py"
-)
-
-_spec = importlib.util.spec_from_file_location("ollama_blackbox", _OLLAMA_PATH)
-_ollama = importlib.util.module_from_spec(_spec)
-assert _spec and _spec.loader
-_spec.loader.exec_module(_ollama)
-
-ollama_chat = _ollama.ollama_chat
-OllamaBlackboxError = _ollama.OllamaBlackboxError
-
-# ----------------------------
-# Constants
-# ----------------------------
-SYS_PARAPHRASE = (
-    "Paraphrase the claim WITHOUT changing meaning. "
-    "Must be DIFFERENT wording than the original (do not copy it). "
-    "ONE short sentence (max 12 words). "
-    "Preserve names, numbers, dates, and negations exactly. "
-    "Output ONLY the paraphrase text (no quotes, no numbering)."
-)
-
-N_PARAPHRASES = 3
-REQUIRE_NUMBERS_MATCH = True
-_NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
-_LEADING_JUNK_RE = re.compile(r"^\s*(?:[-*•]\s*|\d+[\)\.]\s*)")
-
-# for heuristic fallback (only used when LLM yields none)
-_IS_DEAD_RE = re.compile(r"^(?P<subj>.+?)\s+is\s+dead\s*$", re.IGNORECASE)
 
 
 class QueryBuildingError(Exception):
@@ -48,13 +14,51 @@ class QueryBuildingError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-        self.details = details
+        self.details = details or {}
 
+
+# ----------------------------
+# Config
+# ----------------------------
+
+# Default paraphrase count (override via routing.rag.query_variants or env)
+DEFAULT_N_VARIANTS = int((os.getenv("QUERY_EXPAND_N", "4") or "4").strip() or "4")
+DEFAULT_N_VARIANTS = max(0, min(12, DEFAULT_N_VARIANTS))
+
+TEMP_BASE = float((os.getenv("QUERY_EXPAND_TEMP", "0.7") or "0.7").strip() or "0.7")
+TEMP_BASE = max(0.0, min(2.0, TEMP_BASE))
+
+NUM_PREDICT = int((os.getenv("QUERY_EXPAND_NUM_PREDICT", "64") or "64").strip() or "64")
+NUM_PREDICT = max(8, min(512, NUM_PREDICT))
+
+MAX_ATTEMPTS = int((os.getenv("QUERY_EXPAND_MAX_ATTEMPTS", "12") or "12").strip() or "12")
+MAX_ATTEMPTS = max(1, min(50, MAX_ATTEMPTS))
+
+MAX_QUERY_CHARS = int((os.getenv("QUERY_MAX_CHARS", "200") or "200").strip() or "200")
+MAX_QUERY_CHARS = max(40, min(500, MAX_QUERY_CHARS))
+
+
+SYS_PARAPHRASE = (
+    "/no_think\n"
+    "Return ONE paraphrase suitable as a web search query.\n"
+    "Prefer ONE LINE.\n"
+    "Do NOT include reasoning, bullets, numbering, quotes, or multiple options.\n"
+    "Preserve entities and names exactly as in the input.\n"
+    "Do NOT add suffixes like 'news' or 'fact check'.\n"
+)
+
+
+# ----------------------------
+# Meta helpers (schema-safe)
+# ----------------------------
 
 def _copy_meta(meta_in: Dict[str, Any]) -> Dict[str, Any]:
-    meta_out: Dict[str, Any] = {"received_at": meta_in["received_at"], "version": meta_in["version"]}
+    meta_out: Dict[str, Any] = {
+        "received_at": meta_in.get("received_at"),
+        "version": meta_in.get("version"),
+    }
     for k in ("warnings", "latency_ms", "stage_latencies_ms", "total_latency_ms", "stage_errors"):
-        if k in meta_in:
+        if isinstance(meta_in, dict) and k in meta_in:
             meta_out[k] = meta_in[k]
     return meta_out
 
@@ -67,181 +71,253 @@ def _ensure_warnings(meta: Dict[str, Any]) -> List[Dict[str, str]]:
     return meta["warnings"]
 
 
-def _collapse_ws(s: str) -> str:
-    return " ".join(s.strip().split())
+def _ensure_stage_latencies(meta: Dict[str, Any]) -> Dict[str, int]:
+    sl = meta.get("stage_latencies_ms")
+    if isinstance(sl, dict):
+        return sl  # type: ignore[return-value]
+    meta["stage_latencies_ms"] = {}
+    return meta["stage_latencies_ms"]  # type: ignore[return-value]
 
 
-def _clean_llm(s: str) -> str:
-    s = s.strip()
-    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
-    if not lines:
+def _mark_latency(meta: Dict[str, Any], stage_name: str, ms: int) -> None:
+    sl = _ensure_stage_latencies(meta)
+    sl[stage_name] = max(0, int(ms))
+    try:
+        meta["total_latency_ms"] = int(sum(int(v) for v in sl.values() if isinstance(v, (int, float))))
+    except Exception:
+        pass
+
+
+# ----------------------------
+# Local dependency loader (robust under importlib.exec_module)
+# ----------------------------
+
+def _load_llm_blackbox_class():
+    """Load LLMBlackbox via file path so this module works even when dynamically imported."""
+    here = Path(__file__).resolve()
+    llm_path = here.parents[1] / "middlewares" / "llm_blackbox.py"  # production_pipeline/middlewares/llm_blackbox.py
+    spec = importlib.util.spec_from_file_location("pipeline_llm_blackbox", llm_path)
+    if spec is None or spec.loader is None:
+        raise QueryBuildingError("IMPORT_ERROR", "Failed to create spec for llm_blackbox.", {"path": str(llm_path)})
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        return getattr(mod, "LLMBlackbox")
+    except Exception as e:
+        raise QueryBuildingError("IMPORT_ERROR", "llm_blackbox.py did not expose LLMBlackbox.", {"error": str(e)})
+
+
+# ----------------------------
+# Query cleaning
+# ----------------------------
+
+def _clean_query(q: str) -> str:
+    if not isinstance(q, str):
         return ""
-    s = lines[0]
-    s = _LEADING_JUNK_RE.sub("", s)
-    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
-        s = s[1:-1].strip()
-    return _collapse_ws(s)
+    q = q.strip()
+
+    # Keep only the first line if the model returns multi-line by accident.
+    q = q.splitlines()[0].strip()
+
+    # Strip wrapping quotes/backticks.
+    q = q.strip(" \t\r\n\"'`")
+
+    # Remove common bullet prefixes.
+    q = re.sub(r"^(?:[-*•]|\d+[.)])\s*", "", q).strip()
+
+    # Collapse whitespace.
+    q = re.sub(r"\s+", " ", q).strip()
+
+    if len(q) > MAX_QUERY_CHARS:
+        q = q[:MAX_QUERY_CHARS].rstrip()
+
+    return q
 
 
-def _nums(text: str) -> set[str]:
-    return {m.replace(",", "") for m in _NUM_RE.findall(text)}
+# ----------------------------
+# Simple non-LLM fallback paraphraser
+# ----------------------------
 
-
-async def _paraphrase_once(claim: str, seed: int, *, extra_system: str = "") -> str:
-    system = SYS_PARAPHRASE if not extra_system else (SYS_PARAPHRASE + " " + extra_system)
-    out = await ollama_chat(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": claim},
-        ],
-        # slightly higher temp helps it stop copying
-        temperature=0.55,
-        top_p=0.9,
-        seed=seed,
-        num_predict=64,
-    )
-    return str(out.get("content") or "")
-
-
-async def _paraphrase_with_retry(claim: str, claim_id: str, i: int) -> str:
+def _fallback_paraphrases(claim: str, k: int) -> List[str]:
     """
-    If the model copies the original, retry with a stronger constraint.
-    Deterministic seeds: stable across runs.
+    Deterministic, cheap paraphrases used when LLM is unavailable.
+    This keeps the rest of the pipeline working even without Ollama.
     """
-    seed_i = int(hashlib.sha256(f"{claim_id}:{i}:try0".encode("utf-8")).hexdigest()[:8], 16)
-    p0 = _clean_llm(await _paraphrase_once(claim, seed_i))
-    if p0 and p0 != claim:
-        return p0
+    base = _clean_query(claim)
+    if not base or k <= 0:
+        return []
 
-    seed_1 = int(hashlib.sha256(f"{claim_id}:{i}:try1".encode("utf-8")).hexdigest()[:8], 16)
-    p1 = _clean_llm(await _paraphrase_once(
-        claim,
-        seed_1,
-        extra_system="Your last output was too similar. Use different synonyms/rewording."
-    ))
-    if p1 and p1 != claim:
-        return p1
-
-    seed_2 = int(hashlib.sha256(f"{claim_id}:{i}:try2".encode("utf-8")).hexdigest()[:8], 16)
-    p2 = _clean_llm(await _paraphrase_once(
-        claim,
-        seed_2,
-        extra_system="You MUST change wording. If stuck, use synonyms like 'has died'/'died'/'is deceased'."
-    ))
-    return p2  # may still equal claim; caller filters
-
-
-def _heuristic_fallback_variants(claim: str) -> List[str]:
-    """
-    Only kicks in when LLM produced 0 kept paraphrases.
-    Keep these conservative + meaning-preserving for search queries.
-    """
-    c = _collapse_ws(claim)
-
-    m = _IS_DEAD_RE.match(c)
-    if m:
-        subj = m.group("subj").strip()
-        return [
-            f"{subj} has died",
-            f"{subj} died",
-            f"{subj} is deceased",
-        ]
-
-    # generic fallback (very safe): add keyword-style query form
-    return [
-        f"{c} news",
-        f"fact check {c}",
+    templates = [
+        "What is the truth about {c}?",
+        "Fact-check the claim: {c}",
+        "Is it accurate that {c}?",
+        "Latest news about whether {c}",
+        "Background information on the claim that {c}",
     ]
 
+    out: List[str] = []
+    for t in templates:
+        if len(out) >= k:
+            break
+        q = _clean_query(t.format(c=base))
+        if q and q.lower() != base.lower() and all(q.lower() != x.lower() for x in out):
+            out.append(q)
 
-async def process_step3_output(step3_out: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Step3 -> Step4
-    Adds: query_plan
-    """
+    return out[:k]
+
+
+# ----------------------------
+# Paraphrase generation
+# ----------------------------
+
+async def _paraphrase_once(
+    llm,
+    claim: str,
+    *,
+    temperature: float,
+    avoid: Optional[List[str]] = None,
+) -> str:
+    extra = ""
+    if avoid:
+        # Encourage non-duplicate wording without changing entities.
+        joined = " | ".join(x[:80] for x in avoid[:6])
+        extra = f"Avoid repeating these phrasings: {joined}"
+
+    system = SYS_PARAPHRASE + ("\n" + extra if extra else "")
+    text = await llm.generate_async(
+        system_context=system,
+        user_context=claim,
+        temperature=temperature,
+        num_predict=NUM_PREDICT,
+    )
+    return _clean_query(text)
+
+
+async def _generate_paraphrases(
+    claim: str,
+    claim_id: str,
+    *,
+    k: int,
+) -> List[str]:
+    if k <= 0:
+        return []
+
+    kept: List[str] = []
+
+    # Try LLM-based expansion first.
+    try:
+        LLMBlackbox = _load_llm_blackbox_class()
+        llm = LLMBlackbox()
+
+        # We can't seed the backend from here, but we can vary temperature a bit.
+        for attempt in range(MAX_ATTEMPTS):
+            if len(kept) >= k:
+                break
+
+            # Mild temperature jitter to reduce duplicates.
+            temp = float(max(0.0, min(2.0, TEMP_BASE + (0.15 * (attempt % 3)))))
+
+            try:
+                cand = await _paraphrase_once(llm, claim, temperature=temp, avoid=kept)
+            except Exception:
+                # Give up on further LLM attempts; we'll fall back below.
+                break
+
+            if not cand:
+                continue
+
+            # Do not include the original claim verbatim as a "paraphrase".
+            if _clean_query(claim).lower() == cand.lower():
+                continue
+
+            # Deduplicate (case-insensitive).
+            low = cand.lower()
+            if all(low != x.lower() for x in kept):
+                kept.append(cand)
+
+    except Exception:
+        # Any error loading/constructing the LLM will be handled by fallback.
+        kept = []
+
+    # If LLM produced nothing, use deterministic non-LLM fallbacks.
+    if not kept:
+        kept = _fallback_paraphrases(claim, k)
+
+    return kept[:k]
+
+
+# ----------------------------
+# Main
+# ----------------------------
+
+def _resolve_k(step3_out: Dict[str, Any]) -> int:
+    routing = step3_out.get("routing")
+    rag = (routing or {}).get("rag") if isinstance(routing, dict) else {}
+
+    k = rag.get("query_variants")
+    if k is None:
+        k = DEFAULT_N_VARIANTS
+    try:
+        k = int(k)
+    except Exception:
+        k = DEFAULT_N_VARIANTS
+
+    return max(0, min(12, k))
+
+
+async def run_4_query_building(step3_out: Dict[str, Any]) -> Dict[str, Any]:
     try:
         request_id = step3_out["request_id"]
         claim_id = step3_out["claim_id"]
         user_claim = step3_out["user_claim"]
         normalized_claim = step3_out["normalized_claim"]
-        roberta = step3_out["roberta"]
-        routing = step3_out["routing"]
-        meta_in = step3_out["meta"]
-
-        enabled = bool(routing["rag"]["use_query_expansion"])
+        roberta = step3_out.get("roberta")
+        routing = step3_out.get("routing") or {}
+        meta_in = step3_out.get("meta") or {}
     except Exception as e:
         raise QueryBuildingError("INVALID_INPUT", "Step4 expected Step3 output shape.", {"error": str(e)})
 
-    t0 = time.perf_counter()
     meta_out = _copy_meta(meta_in)
     warnings = _ensure_warnings(meta_out)
 
-    queries: List[Dict[str, str]] = [{"q": normalized_claim, "variant": "original"}]
-    kept = 0
-    mode = "original_only"
+    rag = (routing.get("rag") or {}) if isinstance(routing, dict) else {}
+    use_qexp = bool(rag.get("use_query_expansion", True))
 
-    if enabled:
-        raw: List[str] = []
+    primary = _clean_query(str(normalized_claim or user_claim or ""))
+    if not primary:
+        raise QueryBuildingError("EMPTY_CLAIM", "No claim text available for query building.")
+
+    # Step5 expects query_plan["queries"] to be a list of objects
+    # with at least {"q": <query_text>, "variant": <label>}.
+    queries: List[Dict[str, Any]] = [
+        {"q": primary, "variant": "primary"},
+    ]
+    paraphrases: List[str] = []
+
+    if use_qexp:
+        k = _resolve_k(step3_out)
         try:
-            for i in range(N_PARAPHRASES):
-                raw.append(await _paraphrase_with_retry(normalized_claim, claim_id, i))
-        except OllamaBlackboxError as e:
-            warnings.append({"code": "PARAPHRASE_LLM_FAILED", "message": f"LLM paraphrase failed: {e.code}"})
-            raw = []
+            paraphrases = await _generate_paraphrases(primary, claim_id, k=k)
+        except Exception as e:
+            warnings.append({"code": "query_expansion_failed", "message": str(e)})
+            paraphrases = []
 
-        nums0 = _nums(normalized_claim)
-        kept_paras: List[str] = []
-
-        for p in raw:
-            p = _collapse_ws(p)
+        for p in paraphrases:
             if not p:
                 continue
-            if p == normalized_claim:
+            # Deduplicate case-insensitively against existing queries.
+            if any(p.lower() == str((qobj or {}).get("q") or "").lower() for qobj in queries):
                 continue
-            if p in kept_paras:
-                continue
-            if REQUIRE_NUMBERS_MATCH and _nums(p) != nums0:
-                continue
-            kept_paras.append(p)
-            if len(kept_paras) == N_PARAPHRASES:
-                break
-
-        # heuristic fallback if LLM gave nothing useful
-        if len(kept_paras) == 0:
-            fb = _heuristic_fallback_variants(normalized_claim)
-            for p in fb:
-                p = _collapse_ws(p)
-                if not p or p == normalized_claim or p in kept_paras:
-                    continue
-                if REQUIRE_NUMBERS_MATCH and _nums(p) != nums0:
-                    continue
-                kept_paras.append(p)
-                if len(kept_paras) == N_PARAPHRASES:
-                    break
-
-            if len(kept_paras) > 0:
-                warnings.append({"code": "PARAPHRASE_HEURISTIC_FALLBACK", "message": "Used heuristic fallback paraphrases (LLM copied original)."})
-            else:
-                warnings.append({"code": "PARAPHRASE_NONE_KEPT", "message": "No paraphrases passed filters."})
-
-        for p in kept_paras:
             queries.append({"q": p, "variant": "paraphrase"})
 
-        kept = len(kept_paras)
-        mode = "original_plus_paraphrases" if kept > 0 else "original_only"
-
-    step4_ms = int(round((time.perf_counter() - t0) * 1000))
-    meta_out["latency_ms"] = max(0, step4_ms)
-
-    query_plan = {
-        "mode": mode,
-        "primary_query": normalized_claim,
-        "queries": queries,  # 1..4
-        "paraphrase_meta": {
-            "enabled": enabled,
-            "n_requested": (N_PARAPHRASES if enabled else 0),
-            "kept": kept,
-            "filter": {"require_numbers_match": REQUIRE_NUMBERS_MATCH},
+    query_plan: Dict[str, Any] = {
+        "primary_query": primary,
+        "queries": queries,
+        "expansion": {
+            "enabled": bool(use_qexp),
+            "method": "llm_paraphrase_v1" if use_qexp else "none",
+            "requested": int(_resolve_k(step3_out)) if use_qexp else 0,
+            "kept": int(len(paraphrases)) if use_qexp else 0,
         },
     }
 
@@ -255,3 +331,11 @@ async def process_step3_output(step3_out: Dict[str, Any]) -> Dict[str, Any]:
         "query_plan": query_plan,
         "meta": meta_out,
     }
+
+
+async def process_step3_output(step3_out: Dict[str, Any]) -> Dict[str, Any]:
+    t0 = time.perf_counter()
+    out = await run_4_query_building(step3_out)
+    dt_ms = int(round((time.perf_counter() - t0) * 1000))
+    _mark_latency(out["meta"], "step4_query_building", dt_ms)
+    return out

@@ -1,0 +1,45 @@
+{
+    "request_id": "4a0c4d58-c4d4-4770-82e3-e5fa121d2a9b",
+    "claim_id": "claim_701bbbec499e7a2849b9f32ef4fdb6e3de06afa4b2dc0870566d9f77792c6efb",
+    "user_claim": "Kimjeongeun is dead",
+    "normalized_claim": "Kimjeongeun is dead",
+    "roberta": {
+        "label": {
+            "logits": [
+                6.0,
+                -6.0,
+                -6.0
+            ],
+            "probs": [
+                0.9999877117262969,
+                6.144136851565122e-06,
+                6.144136851565122e-06
+            ],
+            "class_id": 0,
+            "class_name": "false"
+        },
+        "confidence": 0.9999877117262969,
+        "model": {
+            "name": "roberta-base(+lora)",
+            "revision": "dev",
+            "ctx_tokens_max": 512,
+            "t_config": 256,
+            "labels": [
+                "false",
+                "mixed",
+                "true"
+            ]
+        },
+        "tokenization": {
+            "truncated": false,
+            "input_tokens": 5,
+            "original_tokens": 5,
+            "max_length": 256
+        }
+    },
+    "meta": {
+        "received_at": "2026-03-03T20:53:46.651939Z",
+        "version": "dev",
+        "latency_ms": 0
+    }
+}

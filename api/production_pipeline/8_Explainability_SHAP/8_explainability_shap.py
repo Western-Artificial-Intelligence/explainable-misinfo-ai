@@ -1,17 +1,14 @@
 # 8_explainability_shap.py
 from __future__ import annotations
 
+import hashlib
+import inspect
 import math
 import os
+import re
 import sys
 import time
-import hashlib
-from typing import Any, Dict, List, Optional, Tuple
-
-
-# ----------------------------
-# Errors
-# ----------------------------
+from typing import Any, Dict, List, Optional
 
 
 class ExplainabilitySHAPError(Exception):
@@ -23,61 +20,35 @@ class ExplainabilitySHAPError(Exception):
 
 
 # ----------------------------
-# Constants (tunable)
+# Config
 # ----------------------------
+SHAP_ENABLED = (os.getenv("EXPLAIN_USE_SHAP", "false") or "false").strip().lower() in ("1", "true", "yes")
 
+SHAP_ALGO = (os.getenv("SHAP_ALGO", "partition") or "partition").strip().lower()
+if SHAP_ALGO not in ("partition", "permutation", "auto"):
+    SHAP_ALGO = "partition"
 
-METHOD = os.getenv("SHAP_METHOD", "shap_partition")  # enum: shap_partition|shap_kernel
-if METHOD not in ("shap_partition", "shap_kernel"):
-    METHOD = "shap_partition"
+SHAP_OUTPUT_SPACE = (os.getenv("SHAP_OUTPUT_SPACE", "probability") or "probability").strip().lower()
+if SHAP_OUTPUT_SPACE not in ("probability", "logit"):
+    SHAP_OUTPUT_SPACE = "probability"
 
-OUTPUT_SPACE = os.getenv("SHAP_OUTPUT_SPACE", "probability")  # enum: logit|probability
-if OUTPUT_SPACE not in ("logit", "probability"):
-    OUTPUT_SPACE = "probability"
+SHAP_NSAMPLES = int((os.getenv("SHAP_NSAMPLES", "256") or "256").strip() or "256")
+SHAP_NSAMPLES = max(1, min(4096, SHAP_NSAMPLES))
 
-NSAMPLES = int(os.getenv("SHAP_NSAMPLES", "256") or "256")
-if NSAMPLES < 1:
-    NSAMPLES = 1
+TOPK_TOKENS = int((os.getenv("SHAP_TOPK_TOKENS", "8") or "8").strip() or "8")
+TOPK_TOKENS = max(1, min(64, TOPK_TOKENS))
 
-TOPK_TOKENS = int(os.getenv("SHAP_TOPK_TOKENS", "8") or "8")
-if TOPK_TOKENS < 1:
-    TOPK_TOKENS = 1
-
-BACKGROUND_STRATEGY = os.getenv("SHAP_BACKGROUND", "masker_default")
-
-EPS = 1e-9
+FALLBACK_MAX_SEGMENTS = int((os.getenv("EXPLAIN_MAX_SEGMENTS", "8") or "8").strip() or "8")
+FALLBACK_MAX_SEGMENTS = max(1, min(24, FALLBACK_MAX_SEGMENTS))
 
 
 # ----------------------------
-# Cache (process-wide)
+# Meta helpers
 # ----------------------------
-
-
-EXPLAINER_CACHE: Dict[str, Dict[str, Any]] = {}
-
-
-# ----------------------------
-# Meta helpers (match prior stages)
-# ----------------------------
-
-
 def _copy_meta(meta_in: Dict[str, Any]) -> Dict[str, Any]:
-    meta_out: Dict[str, Any] = {
-        "received_at": meta_in.get("received_at"),
-        "version": meta_in.get("version"),
-    }
-    for k in (
-        "warnings",
-        "latency_ms",
-        "stage_latencies_ms",
-        "total_latency_ms",
-        "stage_errors",
-        "embed_model",
-        "embedding_cache_enabled",
-        "embedding_cache_namespace",
-        "embedding_cache_ttl_s",
-    ):
-        if k in meta_in:
+    meta_out: Dict[str, Any] = {"received_at": meta_in.get("received_at"), "version": meta_in.get("version")}
+    for k in ("warnings", "latency_ms", "stage_latencies_ms", "total_latency_ms", "stage_errors"):
+        if isinstance(meta_in, dict) and k in meta_in:
             meta_out[k] = meta_in[k]
     return meta_out
 
@@ -99,7 +70,6 @@ def _ensure_stage_errors(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _mark_latency(meta: Dict[str, Any], stage_name: str, ms: int) -> None:
-    meta["latency_ms"] = max(0, int(ms))
     sl = meta.get("stage_latencies_ms")
     if not isinstance(sl, dict):
         sl = {}
@@ -112,29 +82,11 @@ def _mark_latency(meta: Dict[str, Any], stage_name: str, ms: int) -> None:
 
 
 # ----------------------------
-# Helpers (per pseudo)
+# Model inference (prefer Step2 backend)
 # ----------------------------
-
-
-def now_ms() -> int:
-    return int(time.time() * 1000)
-
-
-def clamp_int(x: int, lo: int, hi: int) -> int:
-    return max(lo, min(hi, int(x)))
-
-
-def argsort_desc(values: List[float]) -> List[int]:
-    # deterministic: primary -value, tie -> index asc
-    return [i for i, _v in sorted(enumerate(values), key=lambda t: (-float(t[1]), int(t[0])))]
-
-
-def argsort_asc(values: List[float]) -> List[int]:
-    # deterministic: primary +value, tie -> index asc
-    return [i for i, _v in sorted(enumerate(values), key=lambda t: (float(t[1]), int(t[0])))]
-
-
-def _softmax_row(logits: List[float]) -> List[float]:
+def _softmax(logits: List[float]) -> List[float]:
+    if not logits:
+        return []
     m = max(logits)
     exps = [math.exp(float(x) - float(m)) for x in logits]
     s = float(sum(exps))
@@ -143,100 +95,137 @@ def _softmax_row(logits: List[float]) -> List[float]:
     return [float(e) / s for e in exps]
 
 
-def _build_model_text(normalized_claim: str) -> str:
-    return f"<CLAIM> {normalized_claim} </CLAIM>"
+def _get_step2_module():
+    return sys.modules.get("step2_roberta_inference")
 
 
-def _get_step2_backend():
-    # When invoked via routes/production.py, Step2 is loaded as module name 'step2_roberta_inference'.
-    m = sys.modules.get("step2_roberta_inference")
-    if not m:
-        return None
-    if hasattr(m, "roberta_infer"):
-        return m
-    return None
+def _infer_logits_probs(text: str) -> Dict[str, List[float]]:
+    m = _get_step2_module()
+    if m is not None:
+        backend = getattr(m, "_BACKEND", None)
+        build = getattr(m, "_build_model_text", None)
+        if backend is not None and hasattr(backend, "infer") and callable(build):
+            x = build(str(text))
+            logits, probs = backend.infer(x)
+            return {"logits": list(map(float, logits)), "probs": list(map(float, probs))}
 
-
-def _roberta_infer_fallback(payload: Any) -> Dict[str, Any]:
-    """Deterministic mock identical in spirit to Step2."""
-    digest = hashlib.sha256(str(payload).encode("utf-8")).digest()
+    digest = hashlib.sha256(str(text).encode("utf-8")).digest()
     logits = [((digest[i] / 255.0) * 4.0 - 2.0) for i in range(3)]
-    probs = _softmax_row(logits)
-    return {"label_logits": logits, "label_probs": probs}
+    probs = _softmax(logits)
+    return {"logits": list(map(float, logits)), "probs": list(map(float, probs))}
 
 
-def roberta_predict(texts: List[str]) -> List[List[float]]:
-    """Predict for a batch of texts.
-
-    Returns rows in the requested output space (probabilities by default).
-    """
+def _predict_batch(texts: List[str]) -> List[List[float]]:
     out: List[List[float]] = []
-
-    m = _get_step2_backend()
-    T_CONFIG = int(os.getenv("ROBERTA_T_CONFIG", "256") or "256")
-
     for t in texts:
-        x = _build_model_text(str(t))
-        if m is not None:
-            pred = m.roberta_infer({"x": x, "T_CONFIG": T_CONFIG})  # type: ignore[attr-defined]
-            logits = list(map(float, pred.get("label_logits") or [0.0, 0.0, 0.0]))
-            probs = list(map(float, pred.get("label_probs") or _softmax_row(logits)))
-        else:
-            pred = _roberta_infer_fallback({"x": x, "T_CONFIG": T_CONFIG})
-            logits = list(map(float, pred.get("label_logits") or [0.0, 0.0, 0.0]))
-            probs = list(map(float, pred.get("label_probs") or _softmax_row(logits)))
-
-        if OUTPUT_SPACE == "logit":
-            out.append(logits)
-        else:
-            out.append(probs)
-
+        pred = _infer_logits_probs(t)
+        out.append(pred["probs"] if SHAP_OUTPUT_SPACE == "probability" else pred["logits"])
     return out
 
 
-def _simple_tokens(text: str) -> List[str]:
-    # Stable, UI-friendly tokenization.
-    # Keep punctuation attached (matches Step2's coarse token proxy style).
-    toks = [t for t in (text or "").split() if t.strip()]
-    return toks if toks else [text.strip() or ""]
-
-
-def safe_token_spans(token_strings: List[str], text: str) -> Optional[List[Dict[str, int]]]:
-    """Best-effort char spans for tokens in text.
-
-    Works reliably for simple whitespace tokens.
-    If we cannot align, return None.
-    """
+# ----------------------------
+# Token span mapping (best-effort)
+# ----------------------------
+def _safe_token_spans(tokens: List[str], text: str) -> Optional[List[Dict[str, int]]]:
     if not text:
         return None
-
     spans: List[Dict[str, int]] = []
     cursor = 0
-    for tok in token_strings:
-        if tok == "":
+    for tok in tokens:
+        if tok is None:
+            return None
+        s = str(tok)
+        if s == "":
             spans.append({"start": cursor, "end": cursor})
             continue
-        idx = text.find(tok, cursor)
+        idx = text.find(s, cursor)
         if idx < 0:
-            # try from 0 (tokens may repeat)
-            idx = text.find(tok)
+            idx = text.find(s)
         if idx < 0:
             return None
-        start = idx
-        end = idx + len(tok)
-        spans.append({"start": int(start), "end": int(end)})
-        cursor = end
+        spans.append({"start": int(idx), "end": int(idx + len(s))})
+        cursor = idx + len(s)
     return spans
 
 
-# ----------------------------
-# Main stage
-# ----------------------------
+def _argsort_desc(vals: List[float]) -> List[int]:
+    return [i for i, _ in sorted(enumerate(vals), key=lambda t: (-float(t[1]), int(t[0])))]
 
 
+def _argsort_asc(vals: List[float]) -> List[int]:
+    return [i for i, _ in sorted(enumerate(vals), key=lambda t: (float(t[1]), int(t[0])))]
+
+
+# ----------------------------
+# Fallback: word-span occlusion
+# ----------------------------
+_WORD_RE = re.compile(r"\S+")
+
+
+def _word_spans(text: str) -> List[Dict[str, int]]:
+    return [{"start": m.start(), "end": m.end()} for m in _WORD_RE.finditer(text or "")]
+
+
+def _segment_word_spans(text: str, max_segments: int) -> List[Dict[str, int]]:
+    spans = _word_spans(text)
+    if not spans:
+        return [{"start": 0, "end": 0}]
+    k = max(1, min(max_segments, len(spans)))
+    # group contiguous words into k buckets
+    step = max(1, len(spans) // k)
+    out: List[Dict[str, int]] = []
+    i = 0
+    while i < len(spans):
+        j = min(len(spans), i + step)
+        out.append({"start": spans[i]["start"], "end": spans[j - 1]["end"]})
+        i = j
+    # merge if too many (due to rounding)
+    while len(out) > k:
+        a = out[-2]
+        b = out[-1]
+        out[-2] = {"start": a["start"], "end": b["end"]}
+        out.pop()
+    return out
+
+
+def _mask_span(text: str, start: int, end: int) -> str:
+    if not text:
+        return ""
+    start = max(0, min(len(text), start))
+    end = max(0, min(len(text), end))
+    if end <= start:
+        return text
+    return text[:start] + (" " * (end - start)) + text[end:]
+
+
+def _call_explainer(explainer: Any, inputs: List[str]) -> Any:
+    """
+    SHAP versions differ:
+      - some accept nsamples=
+      - some accept max_evals=
+      - some accept neither
+    We pick what exists in the signature to avoid runtime crashes.
+    """
+    try:
+        sig = inspect.signature(explainer.__call__)
+        params = set(sig.parameters.keys())
+    except Exception:
+        params = set()
+
+    kwargs: Dict[str, Any] = {}
+    if "nsamples" in params:
+        kwargs["nsamples"] = int(SHAP_NSAMPLES)
+    elif "max_evals" in params:
+        # A common substitute in newer SHAP builds
+        kwargs["max_evals"] = int(SHAP_NSAMPLES)
+
+    return explainer(inputs, **kwargs)
+
+
+# ----------------------------
+# Public entrypoint
+# ----------------------------
 async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
-    """Step7 -> Step8: SHAP token-level explainability for claim-only RoBERTa."""
-
     t0 = time.perf_counter()
     meta_out: Dict[str, Any] = _copy_meta(step7_out.get("meta") or {})
     warnings = _ensure_warnings(meta_out)
@@ -256,169 +245,140 @@ async def process_step7_output(step7_out: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         raise ExplainabilitySHAPError("INVALID_INPUT", "Step8 expected Step7 output shape.", {"error": str(e)})
 
-    # 1) explained class from roberta predicted label
+    # class to explain
+    class_id = 0
+    class_name = "false"
     try:
-        explained_class_id = int((((roberta or {}).get("label") or {}).get("class_id")))
-        explained_class_name = str((((roberta or {}).get("label") or {}).get("class_name")))
+        class_id = int((((roberta or {}).get("label") or {}).get("class_id")))
+        class_name = str((((roberta or {}).get("label") or {}).get("class_name")))
     except Exception:
-        explained_class_id = 0
-        explained_class_name = "false"
+        pass
+    if class_id not in (0, 1, 2):
+        class_id = 0
 
-    if explained_class_id not in (0, 1, 2):
-        explained_class_id = 0
-    if explained_class_name not in ("false", "mixed", "true"):
-        explained_class_name = "false"
+    # base/output in probability space
+    base_probs = _infer_logits_probs("")["probs"]
+    out_probs = _infer_logits_probs(normalized_claim)["probs"]
+    base_value = float(base_probs[class_id]) if len(base_probs) >= 3 else 0.0
+    output_value = float(out_probs[class_id]) if len(out_probs) >= 3 else 0.0
 
-    # 2) cache key
-    model = (roberta or {}).get("model") or {}
-    model_name = str(model.get("name") or "unknown")
-    revision = str(model.get("revision") or "unknown")
-    cache_key = f"{model_name}:{revision}:{METHOD}:{OUTPUT_SPACE}:{NSAMPLES}"
+    shap_explainability: Dict[str, Any]
 
-    # Defaults for output (in case SHAP isn't available)
-    probs = (((roberta or {}).get("label") or {}).get("probs") or [0.0, 0.0, 0.0])
-    try:
-        probs = list(map(float, probs))
-    except Exception:
-        probs = [0.0, 0.0, 0.0]
-
-    output_value_fallback = float(probs[explained_class_id]) if len(probs) >= 3 else 0.0
-
-    shap_values: List[float] = []
-    token_strings: List[str] = []
-    base_value: float = 0.0
-    output_value: float = output_value_fallback
-    time_ms: int = 0
-
-    # 3-6) SHAP computation (best-effort)
-    try:
+    if SHAP_ENABLED:
+        # Try SHAP first – caller has explicitly enabled it via EXPLAIN_USE_SHAP.
         try:
             import shap  # type: ignore
-        except Exception:
-            shap = None
 
-        if shap is not None:
-            # Get or create cached masker + explainer
-            cached = EXPLAINER_CACHE.get(cache_key)
-            if cached and "explainer" in cached:
-                explainer = cached["explainer"]
+            def f(text_list: List[str]) -> List[List[float]]:
+                return _predict_batch(list(text_list))
+
+            masker = shap.maskers.Text(None)
+            explainer = shap.Explainer(f, masker, algorithm=SHAP_ALGO)
+
+            start_ms = time.perf_counter()
+            exp = _call_explainer(explainer, [normalized_claim])
+            shap_ms = int(round((time.perf_counter() - start_ms) * 1000))
+
+            tokens = list(exp.data[0])
+            vals = exp.values[0]
+            shap_vals = [float(v[class_id]) for v in vals]
+
+            base_v = exp.base_values[0]
+            if isinstance(base_v, (list, tuple)):
+                base_out = float(base_v[class_id])
             else:
-                def f(text_list: List[str]):
-                    # SHAP expects numpy-ish; list-of-lists is okay for most explainers
-                    return roberta_predict(list(text_list))
+                base_out = float(base_v)
 
-                # If tokenizer is unavailable, Text masker defaults to whitespace.
-                masker = shap.maskers.Text(None)
-                explainer = shap.Explainer(f, masker, algorithm=METHOD)
-                EXPLAINER_CACHE[cache_key] = {"masker": masker, "explainer": explainer}
-
-            start = now_ms()
-            explanation = explainer([normalized_claim], nsamples=NSAMPLES)
-            time_ms = max(0, now_ms() - start)
-
-            # Extract token strings + shap values
-            token_strings = list(explanation.data[0])
-            vals = explanation.values[0]
-
-            # vals: [num_tokens, num_classes]
-            shap_values = [float(v[explained_class_id]) for v in vals]
-
-            # base_values often [1, num_classes] or [num_classes]
-            bv0 = explanation.base_values[0]
-            base_value = float(bv0[explained_class_id]) if isinstance(bv0, (list, tuple)) else float(bv0)
-
-            # output_values may exist
-            if hasattr(explanation, "output_values") and explanation.output_values is not None:
-                ov0 = explanation.output_values[0]
+            out_v = None
+            if hasattr(exp, "output_values") and exp.output_values is not None:
+                ov = exp.output_values[0]
                 try:
-                    output_value = float(ov0[explained_class_id])
+                    out_v = float(ov[class_id])
                 except Exception:
-                    output_value = output_value_fallback
-            else:
-                output_value = output_value_fallback
+                    out_v = None
 
+            spans = _safe_token_spans([str(t) for t in tokens], normalized_claim)
+
+            tok_out: List[Dict[str, Any]] = []
+            for i, tok in enumerate(tokens):
+                rec: Dict[str, Any] = {"i": int(i), "token": str(tok), "shap_value": float(shap_vals[i])}
+                if spans is not None and i < len(spans):
+                    rec["char_span"] = {"start": int(spans[i]["start"]), "end": int(spans[i]["end"])}
+                tok_out.append(rec)
+
+            if not tok_out:
+                tok_out = [{"i": 0, "token": normalized_claim, "shap_value": 0.0}]
+
+            k = max(1, min(TOPK_TOKENS, len(tok_out)))
+            raw_vals = [float(x["shap_value"]) for x in tok_out]
+            top_pos = _argsort_desc(raw_vals)[:k]
+            top_neg = _argsort_asc(raw_vals)[:k]
+
+            shap_explainability = {
+                "method": f"shap_{SHAP_ALGO}",
+                "explained_class": {"class_id": int(class_id), "class_name": class_name},
+                "base_value": float(base_out),
+                "output_value": float(out_v) if out_v is not None else (float(output_value) if SHAP_OUTPUT_SPACE == "probability" else None),
+                "output_space": SHAP_OUTPUT_SPACE,
+                "tokens": tok_out,
+                "top_tokens": {"k": int(k), "positive": list(map(int, top_pos)), "negative": list(map(int, top_neg))},
+                "meta": {"requested_samples": int(SHAP_NSAMPLES), "time_ms": int(shap_ms)},
+            }
+        except Exception as e:
+            stage_errors.append(
+                {
+                    "stage": "8_Explainability_SHAP",
+                    "code": "SHAP_FALLBACK",
+                    "message": "SHAP unavailable or failed; used word-span occlusion fallback.",
+                    "details": {"error": str(e)},
+                }
+            )
+            warnings.append({"code": "SHAP_FALLBACK_USED", "message": "Explainability used word-span occlusion fallback."})
+            SHAP_ENABLED_LOCAL = False
         else:
-            raise RuntimeError("shap_not_installed")
+            SHAP_ENABLED_LOCAL = True
+    else:
+        SHAP_ENABLED_LOCAL = False
 
-    except Exception as e:
-        # Fallback: leave-one-out probability deltas (deterministic)
-        stage_errors.append(
-            {
-                "stage": "8_Explainability_SHAP",
-                "code": "SHAP_FALLBACK",
-                "message": "SHAP unavailable or failed; used leave-one-out token attribution fallback.",
-                "details": {"error": str(e)},
-            }
-        )
+    if not SHAP_ENABLED_LOCAL:
+        spans = _segment_word_spans(normalized_claim, max_segments=FALLBACK_MAX_SEGMENTS)
+        contribs: List[float] = []
+        seg_out: List[Dict[str, Any]] = []
 
-        token_strings = _simple_tokens(normalized_claim)
+        full = _infer_logits_probs(normalized_claim)["probs"]
+        full_v = float(full[class_id]) if len(full) >= 3 else 0.0
 
-        # background: empty claim baseline
-        base_pred = roberta_predict([""])[0]
-        base_value = float(base_pred[explained_class_id]) if len(base_pred) >= 3 else 0.0
+        for i, sp in enumerate(spans):
+            masked = _mask_span(normalized_claim, sp["start"], sp["end"])
+            p = _infer_logits_probs(masked)["probs"]
+            pv = float(p[class_id]) if len(p) >= 3 else 0.0
+            val = float(full_v - pv)
+            contribs.append(val)
+            seg_out.append(
+                {
+                    "i": int(i),
+                    "span": {"start": int(sp["start"]), "end": int(sp["end"])},
+                    "text": normalized_claim[sp["start"] : sp["end"]],
+                    "value": float(val),
+                }
+            )
 
-        full_pred = roberta_predict([normalized_claim])[0]
-        output_value = float(full_pred[explained_class_id]) if len(full_pred) >= 3 else output_value_fallback
+        k = max(1, min(TOPK_TOKENS, len(seg_out)))
+        top_pos = _argsort_desc(contribs)[:k]
+        top_neg = _argsort_asc(contribs)[:k]
 
-        # LOO deltas: output(full) - output(with token i removed)
-        shap_values = []
-        for i in range(len(token_strings)):
-            toks = token_strings[:i] + token_strings[i + 1 :]
-            masked = " ".join(toks).strip()
-            p = roberta_predict([masked])[0]
-            pv = float(p[explained_class_id]) if len(p) >= 3 else 0.0
-            shap_values.append(float(output_value - pv))
+        shap_explainability = {
+            "method": "word_span_occlusion",
+            "explained_class": {"class_id": int(class_id), "class_name": class_name},
+            "base_value": float(base_value),
+            "output_value": float(output_value),
+            "output_space": "probability",
+            "segments": seg_out,
+            "top_segments": {"k": int(k), "positive": list(map(int, top_pos)), "negative": list(map(int, top_neg))},
+            "meta": {"max_segments": int(FALLBACK_MAX_SEGMENTS)},
+        }
 
-        time_ms = 0
-
-        # If everything collapsed, ensure at least 1 token record
-        if len(token_strings) == 0:
-            token_strings = [normalized_claim.strip() or ""]
-            shap_values = [0.0]
-
-        warnings.append(
-            {
-                "code": "SHAP_FALLBACK_USED",
-                "message": "Explainability used a simple token-occlusion fallback; results may be less stable than SHAP.",
-            }
-        )
-
-    # 7) optional spans
-    spans = safe_token_spans(token_strings, normalized_claim)
-
-    # 8) token records
-    tokens_out: List[Dict[str, Any]] = []
-    for i, tok in enumerate(token_strings):
-        rec: Dict[str, Any] = {"i": int(i), "token": str(tok), "shap_value": float(shap_values[i] if i < len(shap_values) else 0.0)}
-        if spans is not None and i < len(spans):
-            rec["char_span"] = {"start": int(spans[i]["start"]), "end": int(spans[i]["end"])}
-        tokens_out.append(rec)
-
-    # Ensure schema minItems=1
-    if len(tokens_out) == 0:
-        tokens_out = [{"i": 0, "token": normalized_claim.strip() or "", "shap_value": 0.0}]
-
-    # 9) top tokens indices (positive / negative), deterministic tie-breaks
-    k = clamp_int(TOPK_TOKENS, 1, len(tokens_out))
-
-    # Positive = largest shap_value
-    idx_pos = argsort_desc([float(t["shap_value"]) for t in tokens_out])[:k]
-    # Negative = smallest shap_value
-    idx_neg = argsort_asc([float(t["shap_value"]) for t in tokens_out])[:k]
-
-    shap_explainability: Dict[str, Any] = {
-        "method": METHOD,
-        "explained_class": {"class_id": int(explained_class_id), "class_name": explained_class_name},
-        "base_value": float(base_value),
-        "output_value": float(output_value),
-        "output_space": OUTPUT_SPACE,
-        "tokens": tokens_out,
-        "top_tokens": {"k": int(k), "positive": list(map(int, idx_pos)), "negative": list(map(int, idx_neg))},
-        "meta": {"background": BACKGROUND_STRATEGY, "nsamples": int(NSAMPLES), "time_ms": int(max(0, time_ms))},
-    }
-
-    ms = int(round((time.perf_counter() - t0) * 1000))
-    _mark_latency(meta_out, "8_Explainability_SHAP", ms)
+    _mark_latency(meta_out, "8_Explainability_SHAP", int(round((time.perf_counter() - t0) * 1000)))
 
     return {
         "request_id": request_id,
