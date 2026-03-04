@@ -44,6 +44,13 @@ def _get_base_url() -> str:
     return os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 
+def _get_api_key() -> Optional[str]:
+    """API key for Ollama Cloud (ollama.com). Not needed for local Ollama."""
+    load_dotenv(override=False)
+    key = os.getenv("OLLAMA_API_KEY", "").strip()
+    return key or None
+
+
 def _get_model() -> str:
     load_dotenv(override=False)
     return os.getenv("OLLAMA_MODEL", "qwen3:4b")
@@ -57,35 +64,41 @@ async def ollama_chat(
     top_p: float = 0.9,
     seed: int = 0,
     num_ctx: int = 4096,
-    num_predict: int = 64,  # ✅ cap output length (prevents rambling/timeouts)
+    num_predict: int = 64,  # cap output length (prevents rambling/timeouts)
+    stop: Optional[List[str]] = None,  # None = use default; [] = no stop
 ) -> Dict[str, Any]:
     """
     Blackbox LLM call. Returns a stable JSON envelope.
     messages: [{"role":"system"|"user"|"assistant","content":"..."}]
     """
-    base_url = _get_base_url()
+    base_url = _get_base_url().rstrip("/")
     model = model or _get_model()
     timeout = _get_timeout()
+    api_key = _get_api_key()
 
     url = f"{base_url}/api/chat"
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": temperature,
-            "top_p": top_p,
-            "seed": seed,
-            "num_ctx": num_ctx,
-            "num_predict": num_predict,
-            "stop": ["\n\n", "\n- ", "\n1.", "\n2.", "\n3."],  # ✅ stop list-y outputs
-        },
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    opts = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "seed": seed,
+        "num_ctx": num_ctx,
+        "num_predict": num_predict,
     }
+    if stop is not None:
+        opts["stop"] = stop
+    else:
+        opts["stop"] = ["\n\n", "\n- ", "\n1.", "\n2.", "\n3."]
+
+    payload = {"model": model, "messages": messages, "stream": False, "options": opts}
 
     t0 = time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, json=payload)
+            r = await client.post(url, json=payload, headers=headers or None)
     except httpx.TimeoutException as e:
         raise OllamaBlackboxError(
             "OLLAMA_TIMEOUT",

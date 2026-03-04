@@ -44,6 +44,10 @@ async function analyzeAudioLevelsAdvanced(videoElement) {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     const audioContext = new AudioContext();
+    // Resume if suspended (required after user gesture on strict sites like TikTok)
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.8;
@@ -214,7 +218,7 @@ function initImageCapture() {
     if (message.type === "START_IMAGE_CAPTURE") {
       startImageCapture(message.payload || {})
         .then(result => sendResponse({ ok: true, result }))
-        .catch(error => sendResponse({ ok: false, error: error.message }));
+        .catch(error => sendResponse({ ok: false, error: String(error?.message || error || "Unknown error") }));
       return true;
     }
 
@@ -274,8 +278,19 @@ async function shouldUseImageCapture(payload = {}) {
  */
 async function startImageCapture(payload = {}) {
   try {
+    // If already capturing (e.g. popup was closed and reopened), clean up and allow fresh start
     if (TLX_IMAGE_STATE.isCapturing) {
-      throw new Error("Image capture already in progress");
+      if (payload.forceCapture) {
+        if (TLX_IMAGE_STATE.captureInterval) {
+          clearInterval(TLX_IMAGE_STATE.captureInterval);
+          TLX_IMAGE_STATE.captureInterval = null;
+        }
+        TLX_IMAGE_STATE.isCapturing = false;
+        TLX_IMAGE_STATE.extractedFrames = [];
+        TLX_IMAGE_STATE.extractedText = [];
+      } else {
+        throw new Error("Image capture already in progress. Close and reopen the popup, then try Force Image Capture.");
+      }
     }
 
     const requestId = `req_img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -307,7 +322,7 @@ async function startImageCapture(payload = {}) {
       }
     }
 
-    // Ensure Tesseract.js is loaded
+    // Try to load Tesseract (optional - backend does OCR if client fails)
     await ensureTesseractLoaded();
 
     // Extract on-screen text elements
@@ -350,12 +365,27 @@ async function stopImageCapture() {
 
     if (TLX_IMAGE_STATE.extractedFrames.length > 0 || TLX_IMAGE_STATE.extractedText.length > 0) {
       await sendImageAndTextForAnalysis();
+    } else {
+      chrome.runtime.sendMessage({
+        type: "IMAGE_ANALYSIS_COMPLETE",
+        payload: {
+          request_id: TLX_IMAGE_STATE.requestId,
+          claim_id: TLX_IMAGE_STATE.claimId,
+          frame_count: 0,
+          captured_text: [],
+          extracted_text: "",
+          misinfo_predictions: [],
+          status: "no_content",
+          analysis: { reason: "No frames or text captured. Play the video and ensure it is visible." }
+        }
+      }).catch(() => {});
     }
 
     return { message: "Image capture stopped" };
 
   } catch (error) {
     console.error("[TruthLens] Error stopping image capture:", error);
+    TLX_IMAGE_STATE.isCapturing = false;
     throw error;
   }
 }
@@ -364,10 +394,12 @@ async function stopImageCapture() {
  * Smart frame capture loop: 1 frame per 1.5s OR on significant visual change
  */
 function startFrameCaptureLoop(videoElement) {
-  const canvas = document.createElement('canvas');
-  canvas.width = videoElement.videoWidth || 640;
-  canvas.height = videoElement.videoHeight || 360;
-  TLX_IMAGE_STATE.canvasContext = canvas.getContext('2d');
+  const canvas = document.createElement("canvas");
+  const w = videoElement.videoWidth || videoElement.clientWidth || 640;
+  const h = videoElement.videoHeight || videoElement.clientHeight || 360;
+  canvas.width = Math.max(w, 320);
+  canvas.height = Math.max(h, 180);
+  TLX_IMAGE_STATE.canvasContext = canvas.getContext("2d");
   
   let lastCaptureTime = 0;
   const MIN_CAPTURE_INTERVAL_MS = 1500; // 1.5 seconds
@@ -382,15 +414,20 @@ function startFrameCaptureLoop(videoElement) {
 
     const now = Date.now();
     
-    // Draw current frame to canvas
+    // Draw current frame to canvas (may fail for cross-origin video)
     try {
-      TLX_IMAGE_STATE.canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-      
-      // Check if frame changed significantly or enough time has passed
+      try {
+        TLX_IMAGE_STATE.canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+      } catch (drawErr) {
+        if (drawErr.name === "SecurityError" || drawErr.message?.includes("tainted")) {
+          return;
+        }
+        throw drawErr;
+      }
+
       const shouldCapture = (now - lastCaptureTime > MIN_CAPTURE_INTERVAL_MS) || hasFrameChanged(canvas);
-      
       if (!shouldCapture) return;
-      
+
       lastCaptureTime = now;
 
       canvas.toBlob(async (blob) => {
@@ -435,11 +472,12 @@ function startFrameCaptureLoop(videoElement) {
  */
 async function performOCROnFrame(imageBlob) {
   try {
-    if (!window.Tesseract) {
+    const TesseractLib = window.Tesseract || (typeof globalThis !== "undefined" && globalThis.Tesseract);
+    if (!TesseractLib || !TesseractLib.recognize) {
       throw new Error("Tesseract not loaded");
     }
 
-    const { data } = await window.Tesseract.recognize(imageBlob, 'eng', {
+    const { data } = await TesseractLib.recognize(imageBlob, "eng", {
       logger: msg => {
         if (msg.status === 'recognizing') {
           // Only log major progress
@@ -518,11 +556,25 @@ function isLikelyUIControl(text) {
 }
 
 /**
- * Find the most visible video element on page
+ * Recursively find all video elements, including inside shadow DOM
+ */
+function findAllVideos(root = document) {
+  const videos = Array.from(root.querySelectorAll('video'));
+  const walk = (node) => {
+    if (node.shadowRoot) {
+      videos.push(...node.shadowRoot.querySelectorAll('video'));
+      node.shadowRoot.querySelectorAll('*').forEach(walk);
+    }
+  };
+  root.querySelectorAll('*').forEach(walk);
+  return videos;
+}
+
+/**
+ * Find the most visible video element on page (including shadow DOM)
  */
 function findVideoElement() {
-  const videoElements = document.querySelectorAll('video');
-  
+  const videoElements = findAllVideos();
   if (videoElements.length === 0) {
     return null;
   }
@@ -532,8 +584,9 @@ function findVideoElement() {
 
   videoElements.forEach(video => {
     const rect = video.getBoundingClientRect();
-    const visibleArea = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(0, rect.top)) *
-                       Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left));
+    const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(0, rect.top));
+    const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left));
+    const visibleArea = visibleHeight * visibleWidth;
 
     if (visibleArea > maxVisibleArea) {
       maxVisibleArea = visibleArea;
@@ -545,27 +598,73 @@ function findVideoElement() {
 }
 
 /**
- * Ensure Tesseract.js library is loaded
+ * Ensure Tesseract.js library is loaded in content script context.
+ * Tries extension-bundled script first (CSP-safe on TikTok), then CDN.
+ * Returns true if loaded, false otherwise. Never throws - capture continues
+ * without client OCR; backend will do server-side OCR on frames.
  */
 async function ensureTesseractLoaded() {
-  return new Promise((resolve, reject) => {
-    if (window.Tesseract) {
-      resolve();
-      return;
+  if (typeof Tesseract !== "undefined" && Tesseract.recognize) {
+    return true;
+  }
+  if (typeof (window.Tesseract || (typeof globalThis !== "undefined" && globalThis.Tesseract)) !== "undefined") {
+    const T = window.Tesseract || globalThis.Tesseract;
+    if (T && T.recognize) {
+      if (!window.Tesseract) window.Tesseract = T;
+      return true;
     }
+  }
 
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.0.2/dist/tesseract.min.js';
-    script.onload = () => {
-      console.log("[TruthLens] Tesseract.js loaded");
-      resolve();
-    };
-    script.onerror = () => {
-      console.error("[TruthLens] Failed to load Tesseract.js");
-      reject(new Error("Failed to load Tesseract.js"));
-    };
-    document.head.appendChild(script);
-  });
+  const loaders = [
+    async () => {
+      // Load from extension (CSP-safe on TikTok - chrome-extension is allowed)
+      const url = typeof chrome !== "undefined" && chrome.runtime?.getURL
+        ? chrome.runtime.getURL("tesseract.min.js")
+        : null;
+      if (!url) return false;
+      return new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.onload = () => {
+          const T = window.Tesseract || (typeof globalThis !== "undefined" && globalThis.Tesseract);
+          if (T && T.recognize) {
+            if (!window.Tesseract) window.Tesseract = T;
+            console.log("[TruthLens] Tesseract.js loaded from extension");
+            resolve(true);
+          } else resolve(false);
+        };
+        script.onerror = () => resolve(false);
+        (document.head || document.documentElement).appendChild(script);
+      });
+    },
+    async () => {
+      try {
+        const res = await fetch(
+          "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.2/dist/tesseract.min.js",
+          { mode: "cors" }
+        );
+        if (!res.ok) return false;
+        const code = await res.text();
+        new Function(code).call(typeof window !== "undefined" ? window : globalThis);
+        const T = window.Tesseract || globalThis.Tesseract;
+        if (T && T.recognize) {
+          if (!window.Tesseract) window.Tesseract = T;
+          console.log("[TruthLens] Tesseract.js loaded from CDN");
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    },
+  ];
+
+  for (const load of loaders) {
+    try {
+      if (await load()) return true;
+    } catch (_) {}
+  }
+
+  console.warn("[TruthLens] Tesseract.js not available. Frames will be sent for server-side OCR.");
+  return false;
 }
 
 /**

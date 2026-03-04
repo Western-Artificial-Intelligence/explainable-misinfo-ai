@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routes import classify, documents, health
 
 load_dotenv()
+load_dotenv(".env.local", override=True)  # Local overrides (e.g. API keys)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app instance
@@ -34,9 +35,11 @@ try:
 except (ModuleNotFoundError, ImportError) as exc:
     logger.warning(
         "Skipping /api/audio routes because dependency is missing: %s. "
-        "Install optional audio deps to enable it.",
+        "Install optional audio deps to enable it. Using fallback.",
         getattr(exc, "name", exc),
     )
+    from .routes import audio_fallback
+    app.include_router(audio_fallback.router)
 
 # Image processing and OCR route
 try:

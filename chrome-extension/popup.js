@@ -408,9 +408,10 @@ async function ensureContentScriptInjected(tab) {
     target: { tabId: tab.id },
     files: ["styles.css"]
   });
+  // Inject all content scripts (image/audio capture are needed for video analysis)
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    files: ["content.js"]
+    files: ["content.js", "audio-capture.js", "image-capture.js"]
   });
 }
 
@@ -641,13 +642,14 @@ async function onAutoDetectCapture() {
       throw new Error(response?.error || "Failed to analyze video");
     }
 
-    const { shouldCapture, audioAnalysis } = response.result;
+    const { shouldCapture, audioAnalysis, reason } = response.result;
+    const msg = reason || audioAnalysis?.reason || "Use audio capture for videos with voice.";
 
     if (shouldCapture) {
-      imageStatus.textContent = `📸 ${audioAnalysis.reason} - Starting image capture...`;
+      imageStatus.textContent = `📸 ${msg} - Starting image capture...`;
       await startImageCaptureInternal();
     } else {
-      imageStatus.textContent = `🔊 ${audioAnalysis.reason} - Use audio capture instead.`;
+      imageStatus.textContent = `🔊 ${msg} - Use audio capture instead.`;
       setBusy(autoDetectCaptureBtn, false, "Auto-Detect & Start");
     }
 
@@ -764,24 +766,61 @@ function renderImageAnalysisResult(result) {
   autoDetectCaptureBtn.classList.remove("tlx-hidden");
   setBusy(stopImageCaptureBtn, false, "Stop & Analyze");
 
-  imageStatus.textContent = "✅ Image analysis complete!";
-  
+  if (result.status === "no_content" || (result.frame_count === 0 && !result.captured_text?.length && !result.extracted_text)) {
+    imageStatus.textContent = "No text or frames captured.";
+    imageAnalysisResult.innerHTML = `
+      <p class="tlx-result-explanation">${escapeHtml(result.analysis?.reason || "Play the video, ensure it is visible and not muted, then try again.")}</p>
+    `;
+    imageAnalysisResult.classList.remove("tlx-hidden");
+    return;
+  }
+
+  imageStatus.textContent = "✅ Video/image analysis complete!";
+
   const frameCount = result.frame_count || 0;
-  const textExtracted = result.captured_text?.length || 0;
-  const analysisResult = result.analysis || {};
+  const capturedText = result.captured_text || result.extracted_text;
+  const textDisplay = Array.isArray(capturedText)
+    ? capturedText.join("\n")
+    : (capturedText || result.extracted_text || "No text extracted");
+  const predictions = result.misinfo_predictions || [];
+
+  let predictionsHtml = "";
+  if (predictions.length > 0) {
+    predictionsHtml = `
+      <div class="tlx-result-meta">
+        <p><strong>Misinformation Analysis:</strong></p>
+        ${predictions
+          .map(
+            (p) => {
+            const isFake = String(p.prediction || "").toUpperCase() === "FAKE";
+            const confPct = Math.round((Number(p.confidence) || 0) * 100);
+            return `
+              <div class="tlx-doc-card" style="margin: 0.5em 0;">
+                <p class="tlx-doc-paragraph">${escapeHtml((p.text || "").slice(0, 120))}${(p.text || "").length > 120 ? "…" : ""}</p>
+                <div class="tlx-result-header">
+                  <span class="tlx-pill ${isFake ? "tlx-pill-fake" : "tlx-pill-real"}">${isFake ? "MISINFO" : "REAL"}</span>
+                  <span class="tlx-result-confidence">${confPct}%</span>
+                </div>
+                <p class="tlx-result-explanation">${escapeHtml(String(p.explanation || ""))}</p>
+              </div>
+            `;
+          }
+          )
+          .join("")}
+      </div>
+    `;
+  }
 
   const html = `
     <div class="tlx-result-header">
-      <strong>Image & Text Analysis</strong>
-      <small>${frameCount} frames • ${textExtracted} text elements</small>
+      <strong>Video/Image Analysis</strong>
+      <small>${frameCount} frames • ${predictions.length} claim(s) analyzed</small>
     </div>
     <div class="tlx-result-meta">
       <p><strong>Extracted Text:</strong></p>
-      <div class="tlx-extracted-text">${escapeHtml(result.captured_text?.join('\n') || 'No text extracted')}</div>
+      <div class="tlx-extracted-text">${escapeHtml(textDisplay)}</div>
     </div>
-    <div class="tlx-result-meta">
-      <small>Request ID: ${escapeHtml(result.request_id || 'N/A')}</small>
-    </div>
+    ${predictionsHtml}
   `;
 
   imageAnalysisResult.innerHTML = html;
