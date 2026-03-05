@@ -102,6 +102,7 @@ _process_step4_output = None     # Stage 5: async
 _process_step5_output = None     # Stage 6: async
 _process_step6_output = None     # Stage 7: async
 _process_step7_output = None     # Stage 8: async
+_process_step8_output = None     # Stage 9: async
 
 
 def _ensure_stages_loaded():
@@ -109,7 +110,7 @@ def _ensure_stages_loaded():
     global _STAGES_LOADED
     global _process_user_claim, _process_step1_output, _process_step2_output
     global _process_step3_output, _process_step4_output, _process_step5_output
-    global _process_step6_output, _process_step7_output
+    global _process_step6_output, _process_step7_output, _process_step8_output
 
     if _STAGES_LOADED:
         return
@@ -123,6 +124,7 @@ def _ensure_stages_loaded():
         ("step6_mmr_selection",       "6_MMR_selection",         "6_mmr_selection.py"),
         ("step7_light_relevance_gate","7_Light_relevance_gate",  "7_light_relevance_gate.py"),
         ("step8_explainability_shap", "8_Explainability_SHAP",   "8_explainability_shap.py"),
+        ("step9_llm_summarization",   "9_LLM_summarization",     "9_llm_summarization.py"),
     ]
 
     modules = {}
@@ -150,6 +152,7 @@ def _ensure_stages_loaded():
     _process_step5_output = _get_fn("step6_mmr_selection",       "process_step5_output")
     _process_step6_output = _get_fn("step7_light_relevance_gate","process_step6_output")
     _process_step7_output = _get_fn("step8_explainability_shap", "process_step7_output")
+    _process_step8_output = _get_fn("step9_llm_summarization",   "process_step8_output")
 
     _STAGES_LOADED = True
     logger.info("Pipeline stage modules loaded")
@@ -293,6 +296,7 @@ class PipelineRunner:
                 ("6_mmr_selection",        _process_step5_output),
                 ("7_light_relevance_gate", _process_step6_output),
                 ("8_explainability_shap",  _process_step7_output),
+                ("9_llm_summarization",    _process_step8_output),
             ]
             for stage_name, stage_fn in async_stages:
                 if stage_fn is None:

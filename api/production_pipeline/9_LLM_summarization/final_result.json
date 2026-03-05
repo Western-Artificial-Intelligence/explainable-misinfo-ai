@@ -1,0 +1,1266 @@
+{
+    "request_id": "4f022437-0dc7-4387-869c-65b96aa8b34e",
+    "claim_id": "claim_7387a3d2dbaf7c069fe71fae6ece5db5fad5e14ae35b473284dbc9882e500557",
+    "user_claim": "there has been a war between south korea and north korea",
+    "normalized_claim": "there has been a war between south korea and north korea",
+    "roberta": {
+        "label": {
+            "logits": [
+                -4.634728988229636,
+                -4.634728988229636,
+                -0.019608471388376313
+            ],
+            "probs": [
+                0.009708737864077667,
+                0.009708737864077667,
+                0.9805825242718447
+            ],
+            "class_id": 2,
+            "class_name": "true"
+        },
+        "confidence": 0.9805825242718447,
+        "model": {
+            "name": "llm_proxy",
+            "revision": "dev",
+            "ctx_tokens_max": 512,
+            "t_config": 256,
+            "labels": [
+                "false",
+                "mixed",
+                "true"
+            ]
+        },
+        "tokenization": {
+            "truncated": false,
+            "input_tokens": 13,
+            "original_tokens": 13,
+            "max_length": 256
+        },
+        "inference_source": "llm",
+        "web_search": {
+            "used": false,
+            "snippet_count": 0,
+            "reason": "no_web_search"
+        }
+    },
+    "routing": {
+        "policy_name": "routing_policy",
+        "policy_version": "v1",
+        "tier": "standard",
+        "rag": {
+            "candidate_pool_size_m": 30,
+            "mmr_top_n": 12,
+            "mmr_lambda": 0.7,
+            "final_top_k": 6,
+            "min_relevance": 0.25,
+            "use_query_expansion": true,
+            "allow_web_search": true
+        }
+    },
+    "query_plan": {
+        "primary_query": "there has been a war between south korea and north korea",
+        "queries": [
+            {
+                "q": "there has been a war between south korea and north korea",
+                "variant": "primary"
+            },
+            {
+                "q": "What is the truth about there has been a war between south korea and north korea?",
+                "variant": "paraphrase"
+            },
+            {
+                "q": "Fact-check the claim: there has been a war between south korea and north korea",
+                "variant": "paraphrase"
+            },
+            {
+                "q": "Is it accurate that there has been a war between south korea and north korea?",
+                "variant": "paraphrase"
+            },
+            {
+                "q": "Latest news about whether there has been a war between south korea and north korea",
+                "variant": "paraphrase"
+            }
+        ],
+        "expansion": {
+            "enabled": true,
+            "method": "llm_paraphrase_v1",
+            "requested": 4,
+            "kept": 4
+        }
+    },
+    "rag_candidates": {
+        "provider": "brave",
+        "params": {
+            "candidate_pool_size_m": 30,
+            "mmr_top_n": 12,
+            "final_top_k": 6,
+            "min_relevance": 0.25,
+            "provider": "brave",
+            "scoring": {
+                "weights": {
+                    "sim": 0.8,
+                    "serp": 0.12,
+                    "fresh": 0.08
+                }
+            },
+            "embedding": {
+                "type": "char_ngram_hash",
+                "dims": 1024,
+                "ngram": 3
+            },
+            "brave": {
+                "count": 10,
+                "max_pages": 6
+            }
+        },
+        "items": [
+            {
+                "chunk_id": "chunk_doc_479d4205f82630af",
+                "text": "Korean conflict - Wikipedia <strong>The Korean conflict</strong> is an ongoing conflict based on the division of Korea between North Korea (Democratic People&#x27;s Republic of Korea) and South Korea (Republic of Korea), both of which claim to be the sole legitimate government of all of Korea. During the Cold War, North Korea was backed by ...",
+                "score": 0.8053236198069782,
+                "score_breakdown": {
+                    "sim": 0.7775073832404471,
+                    "serp": 0.9090909090909091,
+                    "fresh": 0.9278350515463918
+                },
+                "doc": {
+                    "doc_id": "doc_479d4205f82630af",
+                    "url": "https://en.wikipedia.org/wiki/Korean_conflict#",
+                    "title": "Korean conflict - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 2,
+                    "age": "2 weeks ago",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_cdf87f6a1d0ddf53",
+                "text": "Korean War - Wikipedia North Korea became one of the most heavily bombed countries in history, and virtually all of Korea&#x27;s major cities were destroyed. No peace treaty has been signed; <strong>the Korean conflict remains a frozen conflict, which has occasionally flared, such as in the 1966–1969 DMZ Conflict</strong>.",
+                "score": 0.7701255025600334,
+                "score_breakdown": {
+                    "sim": 0.7164001937080631,
+                    "serp": 1.0,
+                    "fresh": 0.9625668449197861
+                },
+                "doc": {
+                    "doc_id": "doc_cdf87f6a1d0ddf53",
+                    "url": "https://en.wikipedia.org/wiki/Korean_War#",
+                    "title": "Korean War - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 1,
+                    "age": "1 week ago",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_afc1597483609bcc",
+                "text": "North Korea–South Korea relations - Wikipedia <strong>The two countries engaged in the Korean War from 1950 to 1953 which ended in an armistice agreement but without a peace treaty. North Korea is a one-party state run by the Kim family. South Korea was formerly governed by a succession of military dictatorships, save for a brief one-year democratic period from 1960 to 1961, until thorough democratization in 1987, after which direct elections were held. Both nations claim the entire Korean Peninsula and outlying islands</strong>...",
+                "score": 0.7586404857809448,
+                "score_breakdown": {
+                    "sim": 0.756189951488476,
+                    "serp": 0.625,
+                    "fresh": 0.9836065573770493
+                },
+                "doc": {
+                    "doc_id": "doc_afc1597483609bcc",
+                    "url": "https://en.wikipedia.org/wiki/North_Korea%E2%80%93South_Korea_relations#",
+                    "title": "North Korea–South Korea relations - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 7,
+                    "age": "3 days ago",
+                    "source_query": "Fact-check the claim: there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_deb6b18736a35242",
+                "text": "North Korea-South Korea Relations Since the Korean War <strong>The Korean War</strong>, which broke out on June 25, 1950, is often referred to as the “forgotten war.” Although it involved a total of 26 nations and resulted in dividing a once homogeneous nation in half and shedding the blood of over 6,000,000 people, it has failed to gain significant public ...",
+                "score": 0.7396568345696777,
+                "score_breakdown": {
+                    "sim": 0.7958210432120971,
+                    "serp": 0.625,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_deb6b18736a35242",
+                    "url": "https://web.stanford.edu/class/e297a/North%20Kores-%20South%20Kores%20Relations%20Since%20the%20Korean%20War#",
+                    "title": "North Korea-South Korea Relations Since the Korean War",
+                    "source": "web.stanford.edu",
+                    "serp_rank": 7,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_9f66cd9e6af0015a",
+                "text": "North Korea–South Korea relations - BBC News It comes a week after the country elected a new president, who vowed to improve Korean relations. ... <strong>The neighbouring countries have long been embroiled in a war of information</strong>.",
+                "score": 0.7198743343413084,
+                "score_breakdown": {
+                    "sim": 0.7710929179266355,
+                    "serp": 0.625,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_9f66cd9e6af0015a",
+                    "url": "https://www.bbc.com/news/topics/cp78wz6vexet#",
+                    "title": "North Korea–South Korea relations - BBC News",
+                    "source": "www.bbc.com",
+                    "serp_rank": 7,
+                    "age": null,
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_5f1bc07a87a36abc",
+                "text": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co Despite the passage of over seven decades since the last shots were fired, <strong>North Korea and South Korea are still technically at war</strong>. This state of affairs has had profound implications for diplomacy, security, and inter-Korean relations.",
+                "score": 0.7047645970453771,
+                "score_breakdown": {
+                    "sim": 0.758968108046739,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.4304026983892971
+                },
+                "doc": {
+                    "doc_id": "doc_5f1bc07a87a36abc",
+                    "url": "https://seasia.co/2025/07/09/the-war-that-never-ended-how-north-korea-and-south-korea-are-technically-still-at-war#",
+                    "title": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co",
+                    "source": "seasia.co",
+                    "serp_rank": 10,
+                    "age": "July 9, 2025",
+                    "source_query": "Is it accurate that there has been a war between south korea and north korea?",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_7e16aa8fe43d79b0",
+                "text": "Understanding the Forever Conflict Between North and South Korea The uneasy truce between the nuclear-armed North and the US-allied South remains one of the most vexing security concerns for the world. ... The guns fell silent in <strong>the Korean War</strong> seven decades ago, but the hostilities never truly ended.",
+                "score": 0.6958959736922534,
+                "score_breakdown": {
+                    "sim": 0.7631025753389316,
+                    "serp": 0.4347826086956522,
+                    "fresh": 0.41550000472037263
+                },
+                "doc": {
+                    "doc_id": "doc_7e16aa8fe43d79b0",
+                    "url": "https://www.bloomberg.com/explainers/north-south-korea-conflict-history#",
+                    "title": "Understanding the Forever Conflict Between North and South Korea",
+                    "source": "www.bloomberg.com",
+                    "serp_rank": 14,
+                    "age": "June 24, 2025",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_ca492bc5882ad23e",
+                "text": "Korean War | Eisenhower Presidential Library After five years of simmering tensions on the Korean peninsula, <strong>the Korean War</strong> began on June 25, 1950, when the Northern Korean People&#x27;s Army invaded South Korea in a coordinated general attack at several strategic points along the 38th parallel, the line dividing communist North Korea from ...",
+                "score": 0.6907844277406614,
+                "score_breakdown": {
+                    "sim": 0.7213376775329695,
+                    "serp": 0.7142857142857143,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_ca492bc5882ad23e",
+                    "url": "https://www.eisenhowerlibrary.gov/research/online-documents/korean-war#",
+                    "title": "Korean War | Eisenhower Presidential Library",
+                    "source": "www.eisenhowerlibrary.gov",
+                    "serp_rank": 5,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_b10de8f0b27a2bc2",
+                "text": "North and South Korea relations: what’s behind the tensions – in 30 seconds | South Korea | The Guardian More than 70 years later , the two countries remain divided by a 2.5-mile (4km) wide and 155-mile (249km) demilitarised zone (DMZ), which serves as a reminder that <strong>North and South Korea are technically still at war</strong>.",
+                "score": 0.6898107355953761,
+                "score_breakdown": {
+                    "sim": 0.7472110043828664,
+                    "serp": 0.588235294117647,
+                    "fresh": 0.26817120993706733
+                },
+                "doc": {
+                    "doc_id": "doc_b10de8f0b27a2bc2",
+                    "url": "https://www.theguardian.com/world/2022/aug/15/north-and-south-korea-tensions-relations-issue-conflict-division-explained-in-30-seconds#",
+                    "title": "North and South Korea relations: what’s behind the tensions – in 30 seconds | South Korea | The Guardian",
+                    "source": "www.theguardian.com",
+                    "serp_rank": 8,
+                    "age": "October 29, 2024",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_b6d506b2b4df5faa",
+                "text": "Amid Rising Tensions, North, South Korea Exchange Threats | Arms Control Association March 2024 By Kelsey Davenport · North and South Korea exchanged threats after the North Korean leader abandoned the goal of unifying the peninsula and labeled South Korea a hostile country. Despite the rising tensions, the Biden administration assesses that <strong>there is no immediate threat of</strong> ...",
+                "score": 0.6862753069751973,
+                "score_breakdown": {
+                    "sim": 0.7395108003856633,
+                    "serp": 0.5555555555555556,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_b6d506b2b4df5faa",
+                    "url": "https://www.armscontrol.org/act/2024-03/news/amid-rising-tensions-north-south-korea-exchange-threats#",
+                    "title": "Amid Rising Tensions, North, South Korea Exchange Threats | Arms Control Association",
+                    "source": "www.armscontrol.org",
+                    "serp_rank": 9,
+                    "age": null,
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_8a4b1e292b953dc9",
+                "text": "Korean War | Dates, Countries, Summary, Map, Casualties, & Facts | Britannica <strong>The Korean War</strong> was a conflict (1950–53) between North Korea, aided by China, and South Korea, aided by the UN with the U.S. as the principal participant. At least 2.5 million people lost their lives in the fighting, which ended in July 1953 ...",
+                "score": 0.6810618438852751,
+                "score_breakdown": {
+                    "sim": 0.7245239168299271,
+                    "serp": 0.8333333333333334,
+                    "fresh": 0.018033880266668006
+                },
+                "doc": {
+                    "doc_id": "doc_8a4b1e292b953dc9",
+                    "url": "https://www.britannica.com/event/Korean-War#",
+                    "title": "Korean War | Dates, Countries, Summary, Map, Casualties, & Facts | Britannica",
+                    "source": "www.britannica.com",
+                    "serp_rank": 3,
+                    "age": "May 4, 1999",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_b6d53276aa2d23ec",
+                "text": "Why North Korea and South Korea’s Ongoing Conflict Is a Global Security Concern The guns fell silent in <strong>the Korean War</strong> seven decades ago, but the hostilities never truly ended. Today, North Korea’s secretive dictator oversees an isolated society and command economy, portraying himself as the benevolent protector of a ...",
+                "score": 0.6765447990018156,
+                "score_breakdown": {
+                    "sim": 0.7366440129852387,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.30089617345978137
+                },
+                "doc": {
+                    "doc_id": "doc_b6d53276aa2d23ec",
+                    "url": "https://www.bloomberg.com/features/roots-of-north-south-korea-conflict/#",
+                    "title": "Why North Korea and South Korea’s Ongoing Conflict Is a Global Security Concern",
+                    "source": "www.bloomberg.com",
+                    "serp_rank": 10,
+                    "age": "January 10, 2025",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_e21b76c8c229802c",
+                "text": "Tensions in the Korean Peninsula: Will Kim Jong Un risk a war? South Korea is expanding its conventional armed forces and, together with the United States, is strengthening deterrence against North Korea by intensifying joint US-South Korean maneuvers. At the turn of the year 2023-24, dictator Kim Jong Un addressed the Central Committee of the Workers’ Party and warned: “The word ‘war’ is already approaching us as a realistic entity, not as an abstract concept.” During a tour of an arms factory, he added that his regime “will not unilaterally decide to start a war on the Korean Peninsula,” but we also have no “intent to avoid war” with the South should South Korea use armed force against the North and “threaten our sovereignty and security,” according to Pyongyang’s state-controlled KCNA news agency.",
+                "score": 0.6654115043071163,
+                "score_breakdown": {
+                    "sim": 0.7276144460367735,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.2520256592606927
+                },
+                "doc": {
+                    "doc_id": "doc_e21b76c8c229802c",
+                    "url": "https://www.visionofhumanity.org/will-kim-jong-un-risk-a-war/#",
+                    "title": "Tensions in the Korean Peninsula: Will Kim Jong Un risk a war?",
+                    "source": "www.visionofhumanity.org",
+                    "serp_rank": 10,
+                    "age": "September 16, 2024",
+                    "source_query": "Fact-check the claim: there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_70ad17a7c164f150",
+                "text": "Why North Korea and South Korea Are Technically Still at War Their leaders are finally meeting, but <strong>North</strong> <strong>Korea</strong> <strong>and</strong> <strong>South</strong> <strong>Korea</strong> are technically still at <strong>war</strong> despite the 1953 Korean <strong>War</strong> Armistice.",
+                "score": 0.6646456875662797,
+                "score_breakdown": {
+                    "sim": 0.7780289468876669,
+                    "serp": 0.3125,
+                    "fresh": 0.0590316257018279
+                },
+                "doc": {
+                    "doc_id": "doc_70ad17a7c164f150",
+                    "url": "https://time.com/5253054/north-korea-south-korea-war-history/#",
+                    "title": "Why North Korea and South Korea Are Technically Still at War",
+                    "source": "time.com",
+                    "serp_rank": 23,
+                    "age": "April 26, 2018",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_b1d4f2ba63d2234c",
+                "text": "North Korea Crisis | Global Conflict Tracker U.S. military involvement in the Korean peninsula has its roots in <strong>the Korean War</strong> of the early 1950s during the early stages of the Cold War, in which the United States supported forces in the southern part of the peninsula against communist ...",
+                "score": 0.660622689910828,
+                "score_breakdown": {
+                    "sim": 0.6753937470039195,
+                    "serp": 0.7692307692307692,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_b1d4f2ba63d2234c",
+                    "url": "https://www.cfr.org/global-conflict-tracker/conflict/north-korea-crisis#",
+                    "title": "North Korea Crisis | Global Conflict Tracker",
+                    "source": "www.cfr.org",
+                    "serp_rank": 4,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_455f4a00c64d30d4",
+                "text": "North and South Korea are in an underground war - is Kim Jong Un winning? North and South Korea are technically still at war, and although it has been years since either side shelled the other, the two sides are fighting on a more subtle front: <strong>a war of information</strong>.",
+                "score": 0.6553591165941673,
+                "score_breakdown": {
+                    "sim": 0.7009684857213618,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.3928304160029472
+                },
+                "doc": {
+                    "doc_id": "doc_455f4a00c64d30d4",
+                    "url": "https://www.bbc.com/news/articles/c98pnx35xj2o#",
+                    "title": "North and South Korea are in an underground war - is Kim Jong Un winning?",
+                    "source": "www.bbc.com",
+                    "serp_rank": 10,
+                    "age": "May 30, 2025",
+                    "source_query": "What is the truth about there has been a war between south korea and north korea?",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_f220b2feb671e92a",
+                "text": "South Korea - Relations, Divisions, Reunification | Britannica South Korea - Relations, Divisions, Reunification: <strong>Tensions between South Korea and the North remained high after the Korean War</strong>, exacerbated by such incidents as the assassination attempt on Park Chung-Hee by North Korean commandos in 1968, ...",
+                "score": 0.65341452063124,
+                "score_breakdown": {
+                    "sim": 0.7632255027880195,
+                    "serp": 0.3448275862068965,
+                    "fresh": 0.018185100699958674
+                },
+                "doc": {
+                    "doc_id": "doc_f220b2feb671e92a",
+                    "url": "https://www.britannica.com/place/South-Korea/Relations-with-the-North#",
+                    "title": "South Korea - Relations, Divisions, Reunification | Britannica",
+                    "source": "www.britannica.com",
+                    "serp_rank": 20,
+                    "age": "July 26, 1999",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_30796802dbbf5f6e",
+                "text": "North Korea Ends Inter-Korean Military Agreement | Arms Control Association The tenuous relationship between North and South Korea deteriorated further after Seoul announced its intention to suspend part of a joint military agreement in response to Pyongyang’s illegal launch of a satellite in November. North Korea responded by terminating its participation entirely.",
+                "score": 0.6514375415743486,
+                "score_breakdown": {
+                    "sim": 0.6792969269679358,
+                    "serp": 0.6666666666666666,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_30796802dbbf5f6e",
+                    "url": "https://www.armscontrol.org/act/2024-02/news/north-korea-ends-inter-korean-military-agreement#",
+                    "title": "North Korea Ends Inter-Korean Military Agreement | Arms Control Association",
+                    "source": "www.armscontrol.org",
+                    "serp_rank": 6,
+                    "age": null,
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_5ef89478c88caa92",
+                "text": "Drones, threats and explosions: Why Korean tensions are rising <strong>The two Koreas are technically still at war since they did not sign a peace treaty when the Korean War ended in 1953</strong>. Reuniting with the South had always been a key, if increasingly unrealistic, part of the North&#x27;s ideology since the inception ...",
+                "score": 0.6481245475997394,
+                "score_breakdown": {
+                    "sim": 0.7049391118676176,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.2626920421100395
+                },
+                "doc": {
+                    "doc_id": "doc_5ef89478c88caa92",
+                    "url": "https://www.bbc.com/news/articles/cvgw8vq2xxyo#",
+                    "title": "Drones, threats and explosions: Why Korean tensions are rising",
+                    "source": "www.bbc.com",
+                    "serp_rank": 10,
+                    "age": "October 15, 2024",
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_6c29b09852855701",
+                "text": "The War That Never Ended: The Legacy of the Korean War | Origins <strong>The truce negotiated in 1953 has yet to be converted into a formal treaty</strong> and this month historian Benjamin Young explores how the memory of this unresolved conflict continues to shape the outlook and actions of both North and South Korea.",
+                "score": 0.6475953916621702,
+                "score_breakdown": {
+                    "sim": 0.6807442395777127,
+                    "serp": 0.625,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_6c29b09852855701",
+                    "url": "https://origins.osu.edu/read/war-never-ended-legacy-korean-war#",
+                    "title": "The War That Never Ended: The Legacy of the Korean War | Origins",
+                    "source": "origins.osu.edu",
+                    "serp_rank": 7,
+                    "age": null,
+                    "source_query": "What is the truth about there has been a war between south korea and north korea?",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_834dbe808d890fb4",
+                "text": "The Korean War | American Experience | Official Site | PBS <strong>The war broke out on June 25, 1950 when North Korean troops crossed the 38th parallel, invading South Korea</strong>. North Korean leader Kim Il-sung launched the attack once he had received a promise of support from Soviet leader Joseph Stalin.",
+                "score": 0.6466557200829112,
+                "score_breakdown": {
+                    "sim": 0.7017000877310975,
+                    "serp": 0.6666666666666666,
+                    "fresh": 0.06619562372541485
+                },
+                "doc": {
+                    "doc_id": "doc_834dbe808d890fb4",
+                    "url": "https://www.pbs.org/wgbh/americanexperience/features/bomb-korean-war/#",
+                    "title": "The Korean War | American Experience | Official Site | PBS",
+                    "source": "www.pbs.org",
+                    "serp_rank": 6,
+                    "age": "March 22, 2019",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_8785f53250b1480d",
+                "text": "Why are there two Koreas? | The Week Sixteen countries, including the UK and US, sent troops to the Korean peninsula in aid of South Korea, while Chinese troops intervened for the North. Referred to as the &quot;forgotten war&quot; by the US army, <strong>the Korean War</strong> has always been eclipsed ...",
+                "score": 0.6402719883902661,
+                "score_breakdown": {
+                    "sim": 0.6962899850157953,
+                    "serp": 0.41666666666666663,
+                    "fresh": 0.41550000472037263
+                },
+                "doc": {
+                    "doc_id": "doc_8785f53250b1480d",
+                    "url": "https://theweek.com/93307/how-did-the-korean-war-start#",
+                    "title": "Why are there two Koreas? | The Week",
+                    "source": "theweek.com",
+                    "serp_rank": 15,
+                    "age": "June 24, 2025",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_9276749612a4d0f2",
+                "text": "The Second Korean War | Wilson Center Digital Archive Still, the period of <strong>the Second Korean War</strong> stands as one of the most dangerous times on the Korean peninsula since 1953. There remains much scholarly debate over the causes of the North Korean aggression. Most interpretations for Pyongyang&#x27;s belligerency during <strong>the Second Korean War</strong> can be ...",
+                "score": 0.637444445730727,
+                "score_breakdown": {
+                    "sim": 0.6936237389815905,
+                    "serp": 0.45454545454545453,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_9276749612a4d0f2",
+                    "url": "https://digitalarchive.wilsoncenter.org/essays/second-korean-war#",
+                    "title": "The Second Korean War | Wilson Center Digital Archive",
+                    "source": "digitalarchive.wilsoncenter.org",
+                    "serp_rank": 13,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_ca8c8b9311acd33c",
+                "text": "A Short History Of The Korean War - The Cold War | IWM <strong>The Korean War started on 25 June 1950 and ended on 27 July 1953</strong>, after the signing of an armistice agreeing that the country would remain divided. At the end of the Second World War, Korea – which had formerly been occupied by the Japanese ...",
+                "score": 0.6362607811340528,
+                "score_breakdown": {
+                    "sim": 0.6853259764175659,
+                    "serp": 0.5,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_ca8c8b9311acd33c",
+                    "url": "https://www.iwm.org.uk/history/a-short-history-of-the-korean-war#",
+                    "title": "A Short History Of The Korean War - The Cold War | IWM",
+                    "source": "www.iwm.org.uk",
+                    "serp_rank": 11,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_8bf4678fbb2d7d82",
+                "text": "North and South Korea: Let Seoul Hit Back - Foreign Policy Research Institute Long-time Korea observers Robert Carlin and Sieg Hecker claimed in an online article on January 11 this year that Kim Jong Un has made a strategic decision to go to war. Carlin and Hecker argue that Kim’s (tactical) decision for war would “only come after he concluded [that] all other options had been exhausted, and that the previous strategy shaping North Korea policy since 1990 had irrevocably failed.” Just a few days later, Kim Jong Un abandoned reunification as a national aspiration in a speech and declared that South Korea is a “primary foe and principal enemy,” further fueling regional and international concerns about a possible conflict on the peninsula.",
+                "score": 0.6240724294706033,
+                "score_breakdown": {
+                    "sim": 0.6735676921210264,
+                    "serp": 0.5555555555555556,
+                    "fresh": 0.23189511383894315
+                },
+                "doc": {
+                    "doc_id": "doc_8bf4678fbb2d7d82",
+                    "url": "https://www.fpri.org/article/2024/07/north-and-south-korea-let-seoul-hit-back/#",
+                    "title": "North and South Korea: Let Seoul Hit Back - Foreign Policy Research Institute",
+                    "source": "www.fpri.org",
+                    "serp_rank": 9,
+                    "age": "July 16, 2024",
+                    "source_query": "Is it accurate that there has been a war between south korea and north korea?",
+                    "source_variant": "paraphrase"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_d3e0f21db27187e8",
+                "text": "Multiple Perspectives on the Korean War - Korean War Legacy The North Koreans had their own view. They argued that the war began not with their invasion of the south, but with earlier border attacks by South Korean leader Syngman Rhee’s forces, ordered by the United States.",
+                "score": 0.6188332369967426,
+                "score_breakdown": {
+                    "sim": 0.7099831914587545,
+                    "serp": 0.37037037037037035,
+                    "fresh": 0.08002799231618209
+                },
+                "doc": {
+                    "doc_id": "doc_d3e0f21db27187e8",
+                    "url": "https://koreanwarlegacy.org/chapters/multiple-perspectives-on-the-korean-war/#",
+                    "title": "Multiple Perspectives on the Korean War - Korean War Legacy",
+                    "source": "koreanwarlegacy.org",
+                    "serp_rank": 18,
+                    "age": "July 4, 2020",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_9a68c93d34fe9b3c",
+                "text": "History of the Korean War - United Nations Command Official Website for the United Nations Command",
+                "score": 0.6024767038688004,
+                "score_breakdown": {
+                    "sim": 0.6347625465026671,
+                    "serp": 0.5555555555555556,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_9a68c93d34fe9b3c",
+                    "url": "https://www.unc.mil/History/1950-1953-Korean-War-Active-Conflict/#",
+                    "title": "History of the Korean War - United Nations Command",
+                    "source": "www.unc.mil",
+                    "serp_rank": 9,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_169e71d008709994",
+                "text": "Are North and South Korea escalating toward war? | Responsible Statecraft The two sides are moving past &#x27;trash talk&#x27; and into the realm of real crisis",
+                "score": 0.5965069438214613,
+                "score_breakdown": {
+                    "sim": 0.675959415935995,
+                    "serp": 0.2857142857142857,
+                    "fresh": 0.26817120983688836
+                },
+                "doc": {
+                    "doc_id": "doc_169e71d008709994",
+                    "url": "https://responsiblestatecraft.org/north-korea-trash-balloons/#",
+                    "title": "Are North and South Korea escalating toward war? | Responsible Statecraft",
+                    "source": "responsiblestatecraft.org",
+                    "serp_rank": 26,
+                    "age": "October 29, 2024",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_80606a0da6253b7d",
+                "text": "r/geopolitics on Reddit: Are we on the brink of a north vs south Korean War? Is N. <strong>Korea</strong> positioning artillery corps near the border just another tease or an actual escalation? How likely it is that <strong>a</strong> <strong>war</strong> breaks out there in…",
+                "score": 0.5911325180868247,
+                "score_breakdown": {
+                    "sim": 0.6686052477613527,
+                    "serp": 0.2941176470588235,
+                    "fresh": 0.2619275278835465
+                },
+                "doc": {
+                    "doc_id": "doc_80606a0da6253b7d",
+                    "url": "https://www.reddit.com/r/geopolitics/comments/1g2v45l/are_we_on_the_brink_of_a_north_vs_south_korean_war/#",
+                    "title": "r/geopolitics on Reddit: Are we on the brink of a north vs south Korean War?",
+                    "source": "www.reddit.com",
+                    "serp_rank": 25,
+                    "age": "October 13, 2024",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            },
+            {
+                "chunk_id": "chunk_doc_28b75eb217231b9d",
+                "text": "70 Years After the Armistice, the Korean Peninsula Still Struggles for Peace | United States Institute of Peace On July 27, 1953, military commanders from the United States, <strong>North</strong> <strong>Korea</strong> <strong>and</strong> China signed an armistice agreement that ended the hostilities of the Korean <strong>War</strong>. The parties agreed to a “complete cessation of hostilities and of all acts of armed force until a final peaceful settlement is ...",
+                "score": 0.5354218401057873,
+                "score_breakdown": {
+                    "sim": 0.6019868695866266,
+                    "serp": 0.3225806451612903,
+                    "fresh": 0.18903333771414021
+                },
+                "doc": {
+                    "doc_id": "doc_28b75eb217231b9d",
+                    "url": "https://www.usip.org/publications/2023/09/70-years-after-armistice-korean-peninsula-still-struggles-peace#",
+                    "title": "70 Years After the Armistice, the Korean Peninsula Still Struggles for Peace | United States Institute of Peace",
+                    "source": "www.usip.org",
+                    "serp_rank": 22,
+                    "age": "January 22, 2024",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                }
+            }
+        ],
+        "stats": {
+            "fetched": 66,
+            "kept": 30,
+            "duplicates_dropped": 36,
+            "filtered": 30
+        }
+    },
+    "mmr_selected": {
+        "top_n": 12,
+        "lambda": 0.7,
+        "relevance_blend_alpha": 0.65,
+        "similarity": {
+            "metric": "cosine",
+            "embed_model": "charhash/1024/3"
+        },
+        "items": [
+            {
+                "chunk_id": "chunk_doc_479d4205f82630af",
+                "text": "Korean conflict - Wikipedia <strong>The Korean conflict</strong> is an ongoing conflict based on the division of Korea between North Korea (Democratic People&#x27;s Republic of Korea) and South Korea (Republic of Korea), both of which claim to be the sole legitimate government of all of Korea. During the Cold War, North Korea was backed by ...",
+                "score": 0.8053236198069782,
+                "score_breakdown": {
+                    "sim": 0.7775073832404471,
+                    "serp": 0.9090909090909091,
+                    "fresh": 0.9278350515463918
+                },
+                "doc": {
+                    "doc_id": "doc_479d4205f82630af",
+                    "url": "https://en.wikipedia.org/wiki/Korean_conflict#",
+                    "title": "Korean conflict - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 2,
+                    "age": "2 weeks ago",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 1,
+                "mmr_score": 0.5534794880581282,
+                "mmr_relevance": 0.7906849829401832,
+                "retrieval_score": 0.8053236198069782
+            },
+            {
+                "chunk_id": "chunk_doc_afc1597483609bcc",
+                "text": "North Korea–South Korea relations - Wikipedia <strong>The two countries engaged in the Korean War from 1950 to 1953 which ended in an armistice agreement but without a peace treaty. North Korea is a one-party state run by the Kim family. South Korea was formerly governed by a succession of military dictatorships, save for a brief one-year democratic period from 1960 to 1961, until thorough democratization in 1987, after which direct elections were held. Both nations claim the entire Korean Peninsula and outlying islands</strong>...",
+                "score": 0.7586404857809448,
+                "score_breakdown": {
+                    "sim": 0.756189951488476,
+                    "serp": 0.625,
+                    "fresh": 0.9836065573770493
+                },
+                "doc": {
+                    "doc_id": "doc_afc1597483609bcc",
+                    "url": "https://en.wikipedia.org/wiki/North_Korea%E2%80%93South_Korea_relations#",
+                    "title": "North Korea–South Korea relations - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 7,
+                    "age": "3 days ago",
+                    "source_query": "Fact-check the claim: there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                },
+                "rank": 2,
+                "mmr_score": 0.2848196979252583,
+                "mmr_relevance": 0.7430696202879691,
+                "retrieval_score": 0.7586404857809448
+            },
+            {
+                "chunk_id": "chunk_doc_cdf87f6a1d0ddf53",
+                "text": "Korean War - Wikipedia North Korea became one of the most heavily bombed countries in history, and virtually all of Korea&#x27;s major cities were destroyed. No peace treaty has been signed; <strong>the Korean conflict remains a frozen conflict, which has occasionally flared, such as in the 1966–1969 DMZ Conflict</strong>.",
+                "score": 0.7701255025600334,
+                "score_breakdown": {
+                    "sim": 0.7164001937080631,
+                    "serp": 1.0,
+                    "fresh": 0.9625668449197861
+                },
+                "doc": {
+                    "doc_id": "doc_cdf87f6a1d0ddf53",
+                    "url": "https://en.wikipedia.org/wiki/Korean_War#",
+                    "title": "Korean War - Wikipedia",
+                    "source": "en.wikipedia.org",
+                    "serp_rank": 1,
+                    "age": "1 week ago",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 3,
+                "mmr_score": 0.28106515914182095,
+                "mmr_relevance": 0.750742563380405,
+                "retrieval_score": 0.7701255025600334
+            },
+            {
+                "chunk_id": "chunk_doc_deb6b18736a35242",
+                "text": "North Korea-South Korea Relations Since the Korean War <strong>The Korean War</strong>, which broke out on June 25, 1950, is often referred to as the “forgotten war.” Although it involved a total of 26 nations and resulted in dividing a once homogeneous nation in half and shedding the blood of over 6,000,000 people, it has failed to gain significant public ...",
+                "score": 0.7396568345696777,
+                "score_breakdown": {
+                    "sim": 0.7958210432120971,
+                    "serp": 0.625,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_deb6b18736a35242",
+                    "url": "https://web.stanford.edu/class/e297a/North%20Kores-%20South%20Kores%20Relations%20Since%20the%20Korean%20War#",
+                    "title": "North Korea-South Korea Relations Since the Korean War",
+                    "source": "web.stanford.edu",
+                    "serp_rank": 7,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 4,
+                "mmr_score": 0.2693155635537037,
+                "mmr_relevance": 0.7198872010952589,
+                "retrieval_score": 0.7396568345696777
+            },
+            {
+                "chunk_id": "chunk_doc_5f1bc07a87a36abc",
+                "text": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co Despite the passage of over seven decades since the last shots were fired, <strong>North Korea and South Korea are still technically at war</strong>. This state of affairs has had profound implications for diplomacy, security, and inter-Korean relations.",
+                "score": 0.7047645970453771,
+                "score_breakdown": {
+                    "sim": 0.758968108046739,
+                    "serp": 0.5263157894736842,
+                    "fresh": 0.4304026983892971
+                },
+                "doc": {
+                    "doc_id": "doc_5f1bc07a87a36abc",
+                    "url": "https://seasia.co/2025/07/09/the-war-that-never-ended-how-north-korea-and-south-korea-are-technically-still-at-war#",
+                    "title": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co",
+                    "source": "seasia.co",
+                    "serp_rank": 10,
+                    "age": "July 9, 2025",
+                    "source_query": "Is it accurate that there has been a war between south korea and north korea?",
+                    "source_variant": "paraphrase"
+                },
+                "rank": 5,
+                "mmr_score": 0.26702899547545833,
+                "mmr_relevance": 0.7196720486728974,
+                "retrieval_score": 0.7047645970453771
+            },
+            {
+                "chunk_id": "chunk_doc_9f66cd9e6af0015a",
+                "text": "North Korea–South Korea relations - BBC News It comes a week after the country elected a new president, who vowed to improve Korean relations. ... <strong>The neighbouring countries have long been embroiled in a war of information</strong>.",
+                "score": 0.7198743343413084,
+                "score_breakdown": {
+                    "sim": 0.7710929179266355,
+                    "serp": 0.625,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_9f66cd9e6af0015a",
+                    "url": "https://www.bbc.com/news/topics/cp78wz6vexet#",
+                    "title": "North Korea–South Korea relations - BBC News",
+                    "source": "www.bbc.com",
+                    "serp_rank": 7,
+                    "age": null,
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                },
+                "rank": 6,
+                "mmr_score": 0.2554378598679046,
+                "mmr_relevance": 0.705183259921383,
+                "retrieval_score": 0.7198743343413084
+            },
+            {
+                "chunk_id": "chunk_doc_7e16aa8fe43d79b0",
+                "text": "Understanding the Forever Conflict Between North and South Korea The uneasy truce between the nuclear-armed North and the US-allied South remains one of the most vexing security concerns for the world. ... The guns fell silent in <strong>the Korean War</strong> seven decades ago, but the hostilities never truly ended.",
+                "score": 0.6958959736922534,
+                "score_breakdown": {
+                    "sim": 0.7631025753389316,
+                    "serp": 0.4347826086956522,
+                    "fresh": 0.41550000472037263
+                },
+                "doc": {
+                    "doc_id": "doc_7e16aa8fe43d79b0",
+                    "url": "https://www.bloomberg.com/explainers/north-south-korea-conflict-history#",
+                    "title": "Understanding the Forever Conflict Between North and South Korea",
+                    "source": "www.bloomberg.com",
+                    "serp_rank": 14,
+                    "age": "June 24, 2025",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                },
+                "rank": 7,
+                "mmr_score": 0.25526155897636904,
+                "mmr_relevance": 0.7009320343229918,
+                "retrieval_score": 0.6958959736922534
+            },
+            {
+                "chunk_id": "chunk_doc_b6d506b2b4df5faa",
+                "text": "Amid Rising Tensions, North, South Korea Exchange Threats | Arms Control Association March 2024 By Kelsey Davenport · North and South Korea exchanged threats after the North Korean leader abandoned the goal of unifying the peninsula and labeled South Korea a hostile country. Despite the rising tensions, the Biden administration assesses that <strong>there is no immediate threat of</strong> ...",
+                "score": 0.6862753069751973,
+                "score_breakdown": {
+                    "sim": 0.7395108003856633,
+                    "serp": 0.5555555555555556,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_b6d506b2b4df5faa",
+                    "url": "https://www.armscontrol.org/act/2024-03/news/amid-rising-tensions-north-south-korea-exchange-threats#",
+                    "title": "Amid Rising Tensions, North, South Korea Exchange Threats | Arms Control Association",
+                    "source": "www.armscontrol.org",
+                    "serp_rank": 9,
+                    "age": null,
+                    "source_query": "Latest news about whether there has been a war between south korea and north korea",
+                    "source_variant": "paraphrase"
+                },
+                "rank": 8,
+                "mmr_score": 0.25099423300321133,
+                "mmr_relevance": 0.697828815255571,
+                "retrieval_score": 0.6862753069751973
+            },
+            {
+                "chunk_id": "chunk_doc_8a4b1e292b953dc9",
+                "text": "Korean War | Dates, Countries, Summary, Map, Casualties, & Facts | Britannica <strong>The Korean War</strong> was a conflict (1950–53) between North Korea, aided by China, and South Korea, aided by the UN with the U.S. as the principal participant. At least 2.5 million people lost their lives in the fighting, which ended in July 1953 ...",
+                "score": 0.6810618438852751,
+                "score_breakdown": {
+                    "sim": 0.7245239168299271,
+                    "serp": 0.8333333333333334,
+                    "fresh": 0.018033880266668006
+                },
+                "doc": {
+                    "doc_id": "doc_8a4b1e292b953dc9",
+                    "url": "https://www.britannica.com/event/Korean-War#",
+                    "title": "Korean War | Dates, Countries, Summary, Map, Casualties, & Facts | Britannica",
+                    "source": "www.britannica.com",
+                    "serp_rank": 3,
+                    "age": "May 4, 1999",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 9,
+                "mmr_score": 0.2480115926297467,
+                "mmr_relevance": 0.6925699987317309,
+                "retrieval_score": 0.6810618438852751
+            },
+            {
+                "chunk_id": "chunk_doc_ca492bc5882ad23e",
+                "text": "Korean War | Eisenhower Presidential Library After five years of simmering tensions on the Korean peninsula, <strong>the Korean War</strong> began on June 25, 1950, when the Northern Korean People&#x27;s Army invaded South Korea in a coordinated general attack at several strategic points along the 38th parallel, the line dividing communist North Korea from ...",
+                "score": 0.6907844277406614,
+                "score_breakdown": {
+                    "sim": 0.7213376775329695,
+                    "serp": 0.7142857142857143,
+                    "fresh": 0.35
+                },
+                "doc": {
+                    "doc_id": "doc_ca492bc5882ad23e",
+                    "url": "https://www.eisenhowerlibrary.gov/research/online-documents/korean-war#",
+                    "title": "Korean War | Eisenhower Presidential Library",
+                    "source": "www.eisenhowerlibrary.gov",
+                    "serp_rank": 5,
+                    "age": null,
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 10,
+                "mmr_score": 0.2476710980237955,
+                "mmr_relevance": 0.6991031171759587,
+                "retrieval_score": 0.6907844277406614
+            },
+            {
+                "chunk_id": "chunk_doc_b10de8f0b27a2bc2",
+                "text": "North and South Korea relations: what’s behind the tensions – in 30 seconds | South Korea | The Guardian More than 70 years later , the two countries remain divided by a 2.5-mile (4km) wide and 155-mile (249km) demilitarised zone (DMZ), which serves as a reminder that <strong>North and South Korea are technically still at war</strong>.",
+                "score": 0.6898107355953761,
+                "score_breakdown": {
+                    "sim": 0.7472110043828664,
+                    "serp": 0.588235294117647,
+                    "fresh": 0.26817120993706733
+                },
+                "doc": {
+                    "doc_id": "doc_b10de8f0b27a2bc2",
+                    "url": "https://www.theguardian.com/world/2022/aug/15/north-and-south-korea-tensions-relations-issue-conflict-division-explained-in-30-seconds#",
+                    "title": "North and South Korea relations: what’s behind the tensions – in 30 seconds | South Korea | The Guardian",
+                    "source": "www.theguardian.com",
+                    "serp_rank": 8,
+                    "age": "October 29, 2024",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "primary"
+                },
+                "rank": 11,
+                "mmr_score": 0.24242585292465965,
+                "mmr_relevance": 0.6947792630466705,
+                "retrieval_score": 0.6898107355953761
+            },
+            {
+                "chunk_id": "chunk_doc_f220b2feb671e92a",
+                "text": "South Korea - Relations, Divisions, Reunification | Britannica South Korea - Relations, Divisions, Reunification: <strong>Tensions between South Korea and the North remained high after the Korean War</strong>, exacerbated by such incidents as the assassination attempt on Park Chung-Hee by North Korean commandos in 1968, ...",
+                "score": 0.65341452063124,
+                "score_breakdown": {
+                    "sim": 0.7632255027880195,
+                    "serp": 0.3448275862068965,
+                    "fresh": 0.018185100699958674
+                },
+                "doc": {
+                    "doc_id": "doc_f220b2feb671e92a",
+                    "url": "https://www.britannica.com/place/South-Korea/Relations-with-the-North#",
+                    "title": "South Korea - Relations, Divisions, Reunification | Britannica",
+                    "source": "www.britannica.com",
+                    "serp_rank": 20,
+                    "age": "July 26, 1999",
+                    "source_query": "there has been a war between south korea and north korea",
+                    "source_variant": "original"
+                },
+                "rank": 12,
+                "mmr_score": 0.2323564692924278,
+                "mmr_relevance": 0.68075061226558,
+                "retrieval_score": 0.65341452063124
+            }
+        ]
+    },
+    "evidence_topk": {
+        "top_k": 6,
+        "min_relevance": 0.25,
+        "method": "mmr_relevance_threshold",
+        "items": [
+            {
+                "rank": 1,
+                "chunk_id": "chunk_doc_479d4205f82630af",
+                "doc_id": "doc_479d4205f82630af",
+                "text": "Korean conflict - Wikipedia <strong>The Korean conflict</strong> is an ongoing conflict based on the division of Korea between North Korea (Democratic People&#x27;s Republic of Korea) and South Korea (Republic of Korea), both of which claim to be the sole legitimate government of all of Korea. During the Cold War, North Korea was backed by ...",
+                "relevance_score": 0.7906849829401832,
+                "doc": {
+                    "source": "en.wikipedia.org",
+                    "title": "Korean conflict - Wikipedia",
+                    "url": "https://en.wikipedia.org/wiki/Korean_conflict#"
+                }
+            },
+            {
+                "rank": 2,
+                "chunk_id": "chunk_doc_cdf87f6a1d0ddf53",
+                "doc_id": "doc_cdf87f6a1d0ddf53",
+                "text": "Korean War - Wikipedia North Korea became one of the most heavily bombed countries in history, and virtually all of Korea&#x27;s major cities were destroyed. No peace treaty has been signed; <strong>the Korean conflict remains a frozen conflict, which has occasionally flared, such as in the 1966–1969 DMZ Conflict</strong>.",
+                "relevance_score": 0.750742563380405,
+                "doc": {
+                    "source": "en.wikipedia.org",
+                    "title": "Korean War - Wikipedia",
+                    "url": "https://en.wikipedia.org/wiki/Korean_War#"
+                }
+            },
+            {
+                "rank": 3,
+                "chunk_id": "chunk_doc_afc1597483609bcc",
+                "doc_id": "doc_afc1597483609bcc",
+                "text": "North Korea–South Korea relations - Wikipedia <strong>The two countries engaged in the Korean War from 1950 to 1953 which ended in an armistice agreement but without a peace treaty. North Korea is a one-party state run by the Kim family. South Korea was formerly governed by a succession of military dictatorships, save for a brief one-year democratic period from 1960 to 1961, until thorough democratization in 1987, after which direct elections were held. Both nations claim the entire Korean Peninsula and outlying islands</strong>...",
+                "relevance_score": 0.7430696202879691,
+                "doc": {
+                    "source": "en.wikipedia.org",
+                    "title": "North Korea–South Korea relations - Wikipedia",
+                    "url": "https://en.wikipedia.org/wiki/North_Korea%E2%80%93South_Korea_relations#"
+                }
+            },
+            {
+                "rank": 4,
+                "chunk_id": "chunk_doc_deb6b18736a35242",
+                "doc_id": "doc_deb6b18736a35242",
+                "text": "North Korea-South Korea Relations Since the Korean War <strong>The Korean War</strong>, which broke out on June 25, 1950, is often referred to as the “forgotten war.” Although it involved a total of 26 nations and resulted in dividing a once homogeneous nation in half and shedding the blood of over 6,000,000 people, it has failed to gain significant public ...",
+                "relevance_score": 0.7198872010952589,
+                "doc": {
+                    "source": "web.stanford.edu",
+                    "title": "North Korea-South Korea Relations Since the Korean War",
+                    "url": "https://web.stanford.edu/class/e297a/North%20Kores-%20South%20Kores%20Relations%20Since%20the%20Korean%20War#"
+                }
+            },
+            {
+                "rank": 5,
+                "chunk_id": "chunk_doc_5f1bc07a87a36abc",
+                "doc_id": "doc_5f1bc07a87a36abc",
+                "text": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co Despite the passage of over seven decades since the last shots were fired, <strong>North Korea and South Korea are still technically at war</strong>. This state of affairs has had profound implications for diplomacy, security, and inter-Korean relations.",
+                "relevance_score": 0.7196720486728974,
+                "doc": {
+                    "source": "seasia.co",
+                    "title": "The War That Never Ended: How North Korea and South Korea Are Technically Still at War - Seasia.co",
+                    "url": "https://seasia.co/2025/07/09/the-war-that-never-ended-how-north-korea-and-south-korea-are-technically-still-at-war#"
+                }
+            },
+            {
+                "rank": 6,
+                "chunk_id": "chunk_doc_9f66cd9e6af0015a",
+                "doc_id": "doc_9f66cd9e6af0015a",
+                "text": "North Korea–South Korea relations - BBC News It comes a week after the country elected a new president, who vowed to improve Korean relations. ... <strong>The neighbouring countries have long been embroiled in a war of information</strong>.",
+                "relevance_score": 0.705183259921383,
+                "doc": {
+                    "source": "www.bbc.com",
+                    "title": "North Korea–South Korea relations - BBC News",
+                    "url": "https://www.bbc.com/news/topics/cp78wz6vexet#"
+                }
+            }
+        ]
+    },
+    "shap_explainability": {
+        "method": "word_span_occlusion",
+        "explained_class": {
+            "class_id": 2,
+            "class_name": "true"
+        },
+        "base_value": 0.14285714285714285,
+        "output_value": 0.9805825242718447,
+        "output_space": "probability",
+        "segments": [
+            {
+                "i": 0,
+                "span": {
+                    "start": 0,
+                    "end": 68
+                },
+                "text": "there has been a war between south korea and north korea [SEP] North",
+                "value": 0.0
+            },
+            {
+                "i": 1,
+                "span": {
+                    "start": 69,
+                    "end": 149
+                },
+                "text": "Korea-South Korea Relations Since the Korean War The Korean War, which broke out",
+                "value": 0.26629680998613037
+            },
+            {
+                "i": 2,
+                "span": {
+                    "start": 150,
+                    "end": 221
+                },
+                "text": "on June 25, 1950, is often referred to as the “forgotten war.” Although",
+                "value": 0.0
+            },
+            {
+                "i": 3,
+                "span": {
+                    "start": 222,
+                    "end": 287
+                },
+                "text": "it involved a total of 26 nations and resulted in dividing a once",
+                "value": 0.0
+            },
+            {
+                "i": 4,
+                "span": {
+                    "start": 288,
+                    "end": 366
+                },
+                "text": "homogeneous nation in half and shedding the blood of over 6,000,000 people, it",
+                "value": 0.0
+            },
+            {
+                "i": 5,
+                "span": {
+                    "start": 367,
+                    "end": 440
+                },
+                "text": "has failed to gain significant public ... [SEP] Why North Korea and South",
+                "value": 0.26629680998613037
+            },
+            {
+                "i": 6,
+                "span": {
+                    "start": 441,
+                    "end": 520
+                },
+                "text": "Korea Are Technically Still at War Their leaders are finally meeting, but North",
+                "value": 0.0
+            },
+            {
+                "i": 7,
+                "span": {
+                    "start": 521,
+                    "end": 610
+                },
+                "text": "Korea and South Korea are technically still at war despite the 1953 Korean War Armistice.",
+                "value": 0.0
+            }
+        ],
+        "top_segments": {
+            "k": 8,
+            "positive": [
+                1,
+                5,
+                0,
+                2,
+                3,
+                4,
+                6,
+                7
+            ],
+            "negative": [
+                0,
+                2,
+                3,
+                4,
+                6,
+                7,
+                1,
+                5
+            ]
+        },
+        "meta": {
+            "max_segments": 8,
+            "evidence_used": [
+                {
+                    "chunk_id": "chunk_doc_deb6b18736a35242",
+                    "sim": 0.7958210432120971,
+                    "doc": {
+                        "doc_id": "doc_deb6b18736a35242",
+                        "url": "https://web.stanford.edu/class/e297a/North%20Kores-%20South%20Kores%20Relations%20Since%20the%20Korean%20War#",
+                        "title": "North Korea-South Korea Relations Since the Korean War",
+                        "source": "web.stanford.edu",
+                        "serp_rank": 7,
+                        "age": null,
+                        "source_query": "there has been a war between south korea and north korea",
+                        "source_variant": "primary"
+                    }
+                },
+                {
+                    "chunk_id": "chunk_doc_70ad17a7c164f150",
+                    "sim": 0.7780289468876669,
+                    "doc": {
+                        "doc_id": "doc_70ad17a7c164f150",
+                        "url": "https://time.com/5253054/north-korea-south-korea-war-history/#",
+                        "title": "Why North Korea and South Korea Are Technically Still at War",
+                        "source": "time.com",
+                        "serp_rank": 23,
+                        "age": "April 26, 2018",
+                        "source_query": "there has been a war between south korea and north korea",
+                        "source_variant": "original"
+                    }
+                }
+            ],
+            "explained_text_source": "claim_plus_top_evidence_by_sim"
+        }
+    },
+    "meta": {
+        "received_at": "2026-03-04T05:06:34.793103Z",
+        "version": "dev",
+        "warnings": [
+            {
+                "code": "ROUTING_TWEAK_TRUE_REDUCE_M",
+                "message": "Reduced candidate pool for high-confidence 'true'."
+            }
+        ],
+        "latency_ms": 3436,
+        "stage_latencies_ms": {
+            "step2_roberta_inference": 3436,
+            "step3_routing_policy": 0,
+            "step4_query_building": 2,
+            "step5_rag_retrieval": 4237,
+            "step6_mmr_selection": 74,
+            "7_Light_relevance_gate": 0,
+            "8_Explainability_SHAP": 186841
+        },
+        "total_latency_ms": 194590,
+        "stage_errors": []
+    }
+}

@@ -1,8 +1,14 @@
+# Import FastAPI framework
+import os  # noqa: F401
+from pathlib import Path
 import logging
 import warnings
 
+logger = logging.getLogger(__name__)
+
 from dotenv import load_dotenv
 
+<<<<<<< HEAD
 # Suppress pydub's ffmpeg-not-found warning at import; audio routes need ffmpeg on PATH at runtime.
 warnings.filterwarnings(
     "ignore",
@@ -17,6 +23,19 @@ from .routes import classify, documents, health
 load_dotenv()
 load_dotenv(".env.local", override=True)  # Local overrides (e.g. API keys)
 logger = logging.getLogger(__name__)
+=======
+# Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.is_file():
+    load_dotenv(_env_path, override=False)
+else:
+    load_dotenv()
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .routes import classify, documents, health, production
+>>>>>>> main
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
