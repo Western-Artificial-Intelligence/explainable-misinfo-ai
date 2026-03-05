@@ -19,10 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import classify, documents, health
 
-load_dotenv()
-load_dotenv(".env.local", override=True)  # Local overrides (e.g. API keys)
-logger = logging.getLogger(__name__)
-
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
 

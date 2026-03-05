@@ -23,3 +23,5 @@ async def transcribe_file_fallback(
         "error": "Audio transcription requires OpenAI Whisper. Install with: pip install openai-whisper",
         "transcription": None,
     }
+
+

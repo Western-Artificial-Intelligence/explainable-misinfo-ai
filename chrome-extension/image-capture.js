@@ -730,7 +730,7 @@ async function sendImageAndTextForAnalysis() {
  */
 async function getBackendUrl() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get({ backendUrl: 'http://localhost:8000' }, (items) => {
+    chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8000' }, (items) => {
       resolve(items.backendUrl);
     });
   });

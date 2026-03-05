@@ -20,11 +20,41 @@ const TLX_AUDIO_STATE = {
   claimId: null
 };
 
+const TLX_LIVE_STATE = {
+  active: false,
+  chunkIntervalId: null,
+  chunkIntervalMs: 2000, // live transcript updates every 2 seconds
+  noAudioCount: 0,
+  // Keep a rolling audio window (more reliable than pure 2s chunks for Whisper)
+  rollingWindowSeconds: 8,
+  minWindowSeconds: 3,
+  rollingPcmChunks: [],
+  rollingSamples: 0,
+  emittedText: "",
+  lastWindowText: ""
+};
+
 /**
  * Initialize audio capture listeners
  * Called when extension loads on TikTok
  */
 function initAudioCapture() {
+  // Restore any persisted live transcript baseline for this page URL so that
+  // reloads do not lose the accumulated text.
+  try {
+    const storageKey = `tlx_live_${location.href}`;
+    if (chrome?.storage?.local) {
+      chrome.storage.local.get({ [storageKey]: "" }, (items) => {
+        const saved = items?.[storageKey];
+        if (typeof saved === "string" && saved.trim()) {
+          TLX_LIVE_STATE.emittedText = saved;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("[TruthLens] Failed to restore live transcript baseline:", e);
+  }
+
   // Listen for requests to start audio capture
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "START_AUDIO_CAPTURE") {
@@ -46,6 +76,50 @@ function initAudioCapture() {
         isCapturing: TLX_AUDIO_STATE.isCapturing,
         requestId: TLX_AUDIO_STATE.requestId
       });
+    }
+
+    if (message.type === "START_LIVE_TRANSCRIPT") {
+      startLiveTranscript(message.payload || {})
+        .then(result => sendResponse({ ok: true, result }))
+        .catch(error => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
+    if (message.type === "PAUSE_LIVE_TRANSCRIPT") {
+      pauseLiveTranscript();
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === "STOP_LIVE_TRANSCRIPT") {
+      stopLiveTranscript();
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === "SET_LIVE_BASELINE") {
+      TLX_LIVE_STATE.emittedText = normalizeWords(message.payload?.text || "");
+      // Persist updated baseline so it survives reloads
+      try {
+        const storageKey = `tlx_live_${location.href}`;
+        if (chrome?.storage?.local) {
+          chrome.storage.local.set({ [storageKey]: TLX_LIVE_STATE.emittedText });
+        }
+      } catch (e) {
+        console.warn("[TruthLens] Failed to persist live baseline:", e);
+      }
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === "GET_LIVE_TRANSCRIPT") {
+      sendResponse({
+        ok: true,
+        text: TLX_LIVE_STATE.emittedText || "",
+      });
+      return false;
+    }
+    if (message.type === "GET_LIVE_STATUS") {
+      sendResponse({
+        active: TLX_LIVE_STATE.active,
+      });
+      return false;
     }
   });
 }
@@ -95,6 +169,24 @@ async function startAudioCapture(payload = {}) {
 }
 
 /**
+ * Stop capture only (stream + context). Does not send audio for transcription.
+ */
+function stopCaptureOnly() {
+  if (TLX_AUDIO_STATE.mediaStream) {
+    TLX_AUDIO_STATE.mediaStream.getTracks().forEach(track => track.stop());
+    TLX_AUDIO_STATE.mediaStream = null;
+  }
+  if (TLX_AUDIO_STATE.audioContext) {
+    TLX_AUDIO_STATE.audioContext.close().catch(() => {});
+    TLX_AUDIO_STATE.audioContext = null;
+  }
+  TLX_AUDIO_STATE.isCapturing = false;
+  TLX_AUDIO_STATE.scriptProcessor = null;
+  TLX_AUDIO_STATE.currentVideoElement = null;
+  TLX_AUDIO_STATE.audioChunks = [];
+}
+
+/**
  * Stop capturing audio and send for transcription
  */
 async function stopAudioCapture() {
@@ -105,22 +197,11 @@ async function stopAudioCapture() {
 
     console.log("[TruthLens] Stopping audio capture");
 
-    // Stop audio stream
-    if (TLX_AUDIO_STATE.mediaStream) {
-      TLX_AUDIO_STATE.mediaStream.getTracks().forEach(track => track.stop());
-      TLX_AUDIO_STATE.mediaStream = null;
-    }
+    const chunks = TLX_AUDIO_STATE.audioChunks.slice();
+    stopCaptureOnly();
 
-    // Close audio context
-    if (TLX_AUDIO_STATE.audioContext) {
-      await TLX_AUDIO_STATE.audioContext.close();
-      TLX_AUDIO_STATE.audioContext = null;
-    }
-
-    TLX_AUDIO_STATE.isCapturing = false;
-
-    if (TLX_AUDIO_STATE.audioChunks.length > 0) {
-      const audioBlob = createWavBlob(TLX_AUDIO_STATE.audioChunks);
+    if (chunks.length > 0) {
+      const audioBlob = createWavBlob(chunks);
       if (audioBlob) {
         await sendAudioForTranscription(audioBlob);
       } else {
@@ -140,8 +221,225 @@ async function stopAudioCapture() {
 
   } catch (error) {
     console.error("[TruthLens] Error stopping audio capture:", error);
+    stopCaptureOnly();
     throw error;
   }
+}
+
+/**
+ * Live transcript: chunk-based only. Sends audio every TLX_LIVE_STATE.chunkIntervalMs.
+ */
+async function startLiveTranscript(options = {}) {
+  if (TLX_LIVE_STATE.active) return { message: "Live transcript already active" };
+
+  await startAudioCapture({ live: true });
+  TLX_LIVE_STATE.active = true;
+  TLX_LIVE_STATE.noAudioCount = 0;
+  TLX_LIVE_STATE.rollingPcmChunks = [];
+  TLX_LIVE_STATE.rollingSamples = 0;
+  TLX_LIVE_STATE.emittedText = normalizeText(options?.initialText || "");
+  TLX_LIVE_STATE.lastWindowText = tailWords(TLX_LIVE_STATE.emittedText, 60);
+
+  TLX_LIVE_STATE.chunkIntervalId = setInterval(async () => {
+    if (!TLX_LIVE_STATE.active) return;
+
+    if (!TLX_AUDIO_STATE.isCapturing) {
+      TLX_LIVE_STATE.noAudioCount += 1;
+      if (TLX_LIVE_STATE.noAudioCount === 2) {
+        chrome.runtime.sendMessage({
+          type: "LIVE_TRANSCRIPT_NO_AUDIO",
+          payload: {
+            hint: "No audio captured yet. On TikTok/YouTube, ensure the main video is playing (not paused), then try Stop and Start capture again."
+          }
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    TLX_LIVE_STATE.noAudioCount = 0;
+
+    // Move newly captured PCM into the rolling window
+    const newChunks = TLX_AUDIO_STATE.audioChunks.slice();
+    TLX_AUDIO_STATE.audioChunks = [];
+    if (newChunks.length === 0) {
+      TLX_LIVE_STATE.noAudioCount += 1;
+      if (TLX_LIVE_STATE.noAudioCount === 2) {
+        chrome.runtime.sendMessage({
+          type: "LIVE_TRANSCRIPT_NO_AUDIO",
+          payload: {
+            hint: "No audio captured yet. On TikTok/YouTube, ensure the main video is playing (not paused), then try Stop and Start capture again."
+          }
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    for (const arr of newChunks) {
+      TLX_LIVE_STATE.rollingPcmChunks.push(arr);
+      TLX_LIVE_STATE.rollingSamples += arr.length;
+    }
+
+    // Trim old audio beyond rolling window
+    const sampleRate = TLX_AUDIO_STATE.sampleRate || 44100;
+    const maxSamples = Math.floor(sampleRate * TLX_LIVE_STATE.rollingWindowSeconds);
+    while (TLX_LIVE_STATE.rollingSamples > maxSamples && TLX_LIVE_STATE.rollingPcmChunks.length > 0) {
+      const dropped = TLX_LIVE_STATE.rollingPcmChunks.shift();
+      TLX_LIVE_STATE.rollingSamples -= dropped.length;
+    }
+
+    const minSamples = Math.floor(sampleRate * TLX_LIVE_STATE.minWindowSeconds);
+    if (TLX_LIVE_STATE.rollingSamples < minSamples) {
+      return;
+    }
+
+    const audioBlob = createWavBlob(TLX_LIVE_STATE.rollingPcmChunks);
+    if (audioBlob) {
+      try {
+        await sendLiveChunkForTranscription(audioBlob);
+      } catch (e) {
+        chrome.runtime.sendMessage({
+          type: "LIVE_TRANSCRIPT_ERROR",
+          payload: { error: e.message || "Chunk transcription failed" }
+        }).catch(() => {});
+      }
+    }
+  }, TLX_LIVE_STATE.chunkIntervalMs);
+
+  return { message: "Live transcript started" };
+}
+
+function pauseLiveTranscript() {
+  if (TLX_LIVE_STATE.chunkIntervalId) {
+    clearInterval(TLX_LIVE_STATE.chunkIntervalId);
+    TLX_LIVE_STATE.chunkIntervalId = null;
+  }
+  TLX_LIVE_STATE.active = false;
+  TLX_LIVE_STATE.rollingPcmChunks = [];
+  TLX_LIVE_STATE.rollingSamples = 0;
+  stopCaptureOnly();
+}
+
+function stopLiveTranscript() {
+  pauseLiveTranscript();
+}
+
+/**
+ * Send a single audio chunk for transcription and broadcast TRANSCRIPT_CHUNK (no TRANSCRIPTION_COMPLETE)
+ */
+async function sendLiveChunkForTranscription(audioBlob) {
+  const backendUrl = await getBackendUrl();
+  const apiUrl = `${backendUrl}/api/audio/transcribe-file`;
+  const requestId = `live_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const claimId = `chunk_${Date.now()}`;
+
+  const formData = new FormData();
+  formData.append("request_id", requestId);
+  formData.append("claim_id", claimId);
+  formData.append("file", audioBlob, "chunk.wav");
+  formData.append("language", "en");
+
+  const response = await fetch(apiUrl, { method: "POST", body: formData });
+  if (!response.ok) {
+    throw new Error(`Backend ${response.status}`);
+  }
+
+  const result = await response.json();
+  console.log("[TruthLens] Live chunk result:", result);
+  if (result && result.error && !result.transcription) {
+    throw new Error(result.error);
+  }
+
+  const tx = result?.transcription || result;
+  let text = tx?.full_text || tx?.text || "";
+  if (!text && Array.isArray(tx?.segments)) {
+    text = tx.segments.map((s) => s.text || "").join(" ");
+  }
+  text = normalizeText(text || "");
+  if (!text) return;
+
+  // Deduplicate overlap between rolling windows (prevents repeated text spam)
+  const delta = computeDeltaTranscript(TLX_LIVE_STATE.lastWindowText, text);
+  if (!delta) return;
+  TLX_LIVE_STATE.emittedText = mergeTranscript(TLX_LIVE_STATE.emittedText, delta);
+  TLX_LIVE_STATE.lastWindowText = text;
+  // Persist the cumulative transcript so it survives reloads
+  try {
+    const storageKey = `tlx_live_${location.href}`;
+    if (chrome?.storage?.local) {
+      chrome.storage.local.set({ [storageKey]: TLX_LIVE_STATE.emittedText });
+    }
+  } catch (e) {
+    console.warn("[TruthLens] Failed to persist live transcript:", e);
+  }
+
+  chrome.runtime.sendMessage({
+    type: "TRANSCRIPT_CHUNK",
+    payload: { text: delta }
+  }).catch(() => {});
+}
+
+function normalizeText(s) {
+  return String(s || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeForMatch(text) {
+  const rawTokens = normalizeText(text).split(" ").filter(Boolean);
+  return rawTokens
+    .map((raw) => {
+      const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      return { raw, key };
+    })
+    .filter((t) => t.key);
+}
+
+function tailWords(text, n) {
+  const toks = normalizeText(text).split(" ").filter(Boolean);
+  if (toks.length <= n) return toks.join(" ");
+  return toks.slice(-n).join(" ");
+}
+
+function computeDeltaTranscript(prevText, newText) {
+  const prevToks = tokenizeForMatch(prevText);
+  const nextToks = tokenizeForMatch(newText);
+  if (nextToks.length === 0) return "";
+  if (prevToks.length === 0) return nextToks.map((t) => t.raw).join(" ").trim();
+
+  // Compare suffix of prev window with prefix of next window.
+  const prevKeys = prevToks.map((t) => t.key);
+  const nextKeys = nextToks.map((t) => t.key);
+
+  const maxOverlap = Math.min(50, prevKeys.length, nextKeys.length);
+  for (let k = maxOverlap; k >= 2; k--) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      if (prevKeys[prevKeys.length - k + i] !== nextKeys[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      return nextToks.slice(k).map((t) => t.raw).join(" ").trim();
+    }
+  }
+
+  // If next window is effectively a subset of prev window, emit nothing.
+  const prevStr = prevKeys.join(" ");
+  const nextStr = nextKeys.join(" ");
+  if (prevStr.includes(nextStr)) return "";
+
+  // Otherwise emit the whole next window (rare), but cap it to last 40 tokens to avoid huge repeats.
+  const capped = nextToks.slice(-40).map((t) => t.raw).join(" ").trim();
+  return capped;
+}
+
+function mergeTranscript(prevText, delta) {
+  const prev = normalizeText(prevText);
+  const d = normalizeText(delta);
+  if (!prev) return d;
+  if (!d) return prev;
+  return `${prev} ${d}`.trim();
 }
 
 /**
@@ -199,75 +497,126 @@ function createWavBlob(pcmChunks) {
 
 /**
  * Find the video element on the page (TikTok, YouTube, etc.)
+ * Prefers the video that is actually playing (TikTok feed has multiple videos).
  */
 function findVideoElement() {
-  // TikTok uses video elements in their feed
-  const videoElements = document.querySelectorAll('video');
-  
-  if (videoElements.length === 0) {
-    return null;
+  const videoElements = Array.from(document.querySelectorAll('video'));
+  if (videoElements.length === 0) return null;
+
+  // Prefer a video that is currently playing (not paused, has data)
+  const playing = videoElements.filter(
+    (v) => !v.paused && v.readyState >= 2
+  );
+  if (playing.length > 0) {
+    const byVisible = playing.slice().sort((a, b) => visibleArea(b) - visibleArea(a));
+    return byVisible[0];
   }
 
-  // Find the most visible video (usually the one in focus)
-  let mostVisibleVideo = null;
-  let maxVisibleArea = 0;
-
-  videoElements.forEach(video => {
-    const rect = video.getBoundingClientRect();
-    const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(0, rect.top));
-    const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left));
-    const visibleArea = visibleHeight * visibleWidth;
-
-    if (visibleArea > maxVisibleArea) {
-      maxVisibleArea = visibleArea;
-      mostVisibleVideo = video;
+  // Fallback: largest visible (e.g. video not yet playing or muted attribute on element)
+  let best = null;
+  let maxArea = 0;
+  videoElements.forEach((video) => {
+    const area = visibleArea(video);
+    if (area > maxArea) {
+      maxArea = area;
+      best = video;
     }
   });
+  return best;
+}
 
-  return mostVisibleVideo;
+function visibleArea(el) {
+  const rect = el.getBoundingClientRect();
+  const h = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(0, rect.top));
+  const w = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left));
+  return h * w;
 }
 
 /**
- * Capture audio from video element
- * Uses Web Audio API to extract audio stream
+ * Capture audio from video element.
+ * Tries createMediaElementSource first (best audio); if the element is already connected
+ * (e.g. by YouTube), falls back to captureStream() + createMediaStreamSource.
  */
 async function captureAudioFromVideo(videoElement) {
   try {
-    // Create audio context
     TLX_AUDIO_STATE.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     TLX_AUDIO_STATE.sampleRate = TLX_AUDIO_STATE.audioContext.sampleRate;
 
-    // Create media element audio source
-    const source = TLX_AUDIO_STATE.audioContext.createMediaElementAudioSource(videoElement);
+    let source = null;
+    const alreadyConnected = /already connected|MediaElementSourceNode/i;
 
-    // Create script processor for audio capture
-    const sampleRate = TLX_AUDIO_STATE.audioContext.sampleRate;
-    const bufferSize = 4096;
-    
-    TLX_AUDIO_STATE.scriptProcessor = TLX_AUDIO_STATE.audioContext.createScriptProcessor(
-      bufferSize,
-      1, // input channels
-      1  // output channels
-    );
-
-    // Collect audio data
-    TLX_AUDIO_STATE.scriptProcessor.onaudioprocess = (event) => {
-      const inputData = event.inputBuffer.getChannelData(0);
-      
-      // Convert float32 to PCM16
-      const pcmData = new Int16Array(inputData.length);
-      for (let i = 0; i < inputData.length; i++) {
-        pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) < 0
-          ? inputData[i] * 0x8000
-          : inputData[i] * 0x7fff;
+    try {
+      source = TLX_AUDIO_STATE.audioContext.createMediaElementSource(videoElement);
+      TLX_AUDIO_STATE.mediaStream = null;
+    } catch (e) {
+      if (alreadyConnected.test(String(e.message))) {
+        const stream = videoElement.captureStream
+          ? videoElement.captureStream()
+          : (videoElement.mozCaptureStream && videoElement.mozCaptureStream());
+        if (!stream) {
+          throw new Error("This page does not support stream capture. Try refreshing and start capture after the video is playing.");
+        }
+        const audioTracks = stream.getAudioTracks ? stream.getAudioTracks() : [];
+        if (audioTracks.length === 0) {
+          throw new Error("This page does not expose audio in the capture. Try starting capture only after the video has been playing for a few seconds, or use a different video.");
+        }
+        TLX_AUDIO_STATE.mediaStream = stream;
+        source = TLX_AUDIO_STATE.audioContext.createMediaStreamSource(stream);
+      } else {
+        throw e;
       }
+    }
 
-      TLX_AUDIO_STATE.audioChunks.push(pcmData);
-    };
+    const sampleRate = TLX_AUDIO_STATE.audioContext.sampleRate;
 
-    // Connect nodes
-    source.connect(TLX_AUDIO_STATE.scriptProcessor);
-    TLX_AUDIO_STATE.scriptProcessor.connect(TLX_AUDIO_STATE.audioContext.destination);
+    if (TLX_LIVE_STATE.useLiveWs && TLX_LIVE_STATE.ws) {
+      try {
+        const workletUrl = chrome.runtime.getURL("capture-worklet.js");
+        await TLX_AUDIO_STATE.audioContext.audioWorklet.addModule(workletUrl);
+        const workletNode = new AudioWorkletNode(TLX_AUDIO_STATE.audioContext, "capture-worklet-processor", {
+          processorOptions: { sampleRate }
+        });
+        workletNode.port.onmessage = (event) => {
+          if (TLX_LIVE_STATE.ws && TLX_LIVE_STATE.ws.readyState === WebSocket.OPEN) {
+            TLX_LIVE_STATE.ws.send(event.data);
+          }
+        };
+        source.connect(workletNode);
+        workletNode.connect(TLX_AUDIO_STATE.audioContext.destination);
+        TLX_LIVE_STATE.workletNode = workletNode;
+      } catch (e) {
+        console.warn("[TruthLens] AudioWorklet failed, using chunk fallback:", e);
+        TLX_LIVE_STATE.useLiveWs = false;
+      }
+    }
+
+    if (!TLX_LIVE_STATE.workletNode) {
+      const bufferSize = 4096;
+      TLX_AUDIO_STATE.scriptProcessor = TLX_AUDIO_STATE.audioContext.createScriptProcessor(
+        bufferSize,
+        1,
+        1
+      );
+      TLX_AUDIO_STATE.scriptProcessor.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+        const outputData = event.outputBuffer.getChannelData(0);
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          const v = inputData[i];
+          // Pass-through audio so user still hears sound
+          outputData[i] = v;
+          // Capture as 16-bit PCM
+          pcmData[i] = Math.max(-1, Math.min(1, v)) < 0 ? v * 0x8000 : v * 0x7fff;
+        }
+        TLX_AUDIO_STATE.audioChunks.push(pcmData);
+      };
+      source.connect(TLX_AUDIO_STATE.scriptProcessor);
+      TLX_AUDIO_STATE.scriptProcessor.connect(TLX_AUDIO_STATE.audioContext.destination);
+    }
+
+    if (TLX_AUDIO_STATE.audioContext.state === "suspended") {
+      await TLX_AUDIO_STATE.audioContext.resume();
+    }
 
     console.log("[TruthLens] Audio capture initialized");
 
@@ -342,7 +691,7 @@ async function sendAudioForTranscription(audioBlob) {
  */
 async function getBackendUrl() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get({ backendUrl: 'http://localhost:8000' }, (items) => {
+    chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8000' }, (items) => {
       resolve(items.backendUrl);
     });
   });

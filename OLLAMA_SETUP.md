@@ -124,3 +124,7 @@ When Ollama is running with a compatible model:
 - **Claim extractor**: `api.services.claim_extractor` uses the system prompts in `_SYSTEM_PROMPT_OCR` and `_SYSTEM_PROMPT_TRANSCRIPT`
 
 If Ollama is unavailable, the pipeline falls back to using the raw text directly for classification.
+
+## 7. Live transcript (chunk-based)
+
+The extension’s **Start capture** streams short audio chunks to the backend and updates the transcript in the popup about every **2 seconds**. This uses the existing `/api/audio/transcribe-file` endpoint under the hood – there is no separate WebSocket or extra dependency required.

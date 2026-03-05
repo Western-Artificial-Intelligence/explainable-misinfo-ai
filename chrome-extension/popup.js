@@ -18,6 +18,11 @@ const stopAudioBtn = document.getElementById("stopAudioBtn");
 const audioStatus = document.getElementById("audioStatus");
 const transcriptionResult = document.getElementById("transcriptionResult");
 
+const liveTranscriptText = document.getElementById("liveTranscriptText");
+const liveStartPauseBtn = document.getElementById("liveStartPauseBtn");
+const liveStopBtn = document.getElementById("liveStopBtn");
+const liveTranscriptStatus = document.getElementById("liveTranscriptStatus");
+
 const autoDetectCaptureBtn = document.getElementById("autoDetectCaptureBtn");
 const startImageCaptureBtn = document.getElementById("startImageCaptureBtn");
 const stopImageCaptureBtn = document.getElementById("stopImageCaptureBtn");
@@ -27,8 +32,28 @@ const imageAnalysisResult = document.getElementById("imageAnalysisResult");
 let overlaysEnabled = false;
 let audioCapturing = false;
 let imageCapturing = false;
+let liveCapturing = false;
+let livePaused = false; // legacy; kept for minimal diff
 
 initPopup();
+
+function syncLiveTranscriptEditability() {
+  if (!liveTranscriptText) return;
+  // Editable only when capture is stopped.
+  const editable = !liveCapturing;
+  liveTranscriptText.setAttribute("contenteditable", editable ? "true" : "false");
+  liveTranscriptText.setAttribute("role", "textbox");
+  liveTranscriptText.setAttribute("aria-multiline", "true");
+  liveTranscriptText.style.outline = editable ? "1px solid rgba(148, 163, 184, 0.6)" : "";
+}
+
+function syncLiveClearAvailability() {
+  if (!liveStopBtn) return;
+  // Clear should only be available when NOT recording.
+  const canClear = !liveCapturing;
+  liveStopBtn.disabled = !canClear;
+  liveStopBtn.classList.toggle("tlx-hidden", !canClear);
+}
 
 async function initPopup() {
   analyzeSelectionBtn.addEventListener("click", onAnalyzeSelection);
@@ -37,6 +62,9 @@ async function initPopup() {
   analyzeDocumentBtn.addEventListener("click", onAnalyzeDocument);
   startAudioBtn.addEventListener("click", onStartAudioCapture);
   stopAudioBtn.addEventListener("click", onStopAudioCapture);
+  if (liveStartPauseBtn) liveStartPauseBtn.addEventListener("click", onLiveStartPause);
+  if (liveStopBtn) liveStopBtn.addEventListener("click", onLiveStop);
+  if (liveTranscriptText) liveTranscriptText.addEventListener("input", onLiveTranscriptEdited);
   autoDetectCaptureBtn.addEventListener("click", onAutoDetectCapture);
   startImageCaptureBtn.addEventListener("click", onStartImageCapture);
   stopImageCaptureBtn.addEventListener("click", onStopImageCapture);
@@ -47,6 +75,23 @@ async function initPopup() {
       renderTranscriptionResult(message.payload);
     } else if (message.type === "TRANSCRIPTION_ERROR") {
       renderTranscriptionError(message.payload?.error || "Unknown error");
+    } else if (message.type === "TRANSCRIPT_CHUNK") {
+      appendLiveTranscriptChunk(message.payload?.text);
+    } else if (message.type === "LIVE_TRANSCRIPT_ERROR") {
+      const errMsg = message.payload?.error || "Chunk error";
+      setLiveTranscriptStatus(errMsg, true);
+      if (liveTranscriptText) {
+        const prefix = liveTranscriptText.textContent.trim() ? "\n\n" : "";
+        liveTranscriptText.textContent += prefix + "[Transcription failed] " + errMsg;
+        liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+      }
+    } else if (message.type === "LIVE_TRANSCRIPT_NO_AUDIO") {
+      const hint = message.payload?.hint || "No audio in chunk. Is the video playing and unmuted?";
+      setLiveTranscriptStatus(hint, false);
+      if (liveTranscriptText && !liveTranscriptText.textContent.trim()) {
+        liveTranscriptText.textContent = "[Waiting for audio] " + hint;
+        liveTranscriptText.scrollTop = 0;
+      }
     } else if (message.type === "IMAGE_ANALYSIS_COMPLETE") {
       renderImageAnalysisResult(message.payload);
     } else if (message.type === "IMAGE_ANALYSIS_ERROR") {
@@ -60,11 +105,47 @@ async function initPopup() {
     return;
   }
 
-  const status = await sendToContentScript(tab, { type: "GET_OVERLAY_STATUS" }, { injectIfNeeded: true }).catch(
-    () => null
-  );
+  const status = await sendToContentScript(tab, { type: "GET_OVERLAY_STATUS" }, { injectIfNeeded: true }).catch(() => null);
   overlaysEnabled = Boolean(status?.enabled);
   syncOverlayButtonText();
+
+  // Sync live transcript button with actual capture state on the content side
+  try {
+    const liveStatus = await sendToContentScript(tab, { type: "GET_LIVE_STATUS" }, { injectIfNeeded: true }).catch(
+      () => null
+    );
+    const isLiveActive = Boolean(liveStatus?.active);
+    liveCapturing = isLiveActive;
+    if (isLiveActive) {
+      liveStartPauseBtn.textContent = "Stop";
+      setLiveTranscriptStatus("🔴 Capturing — transcript updates every few seconds.");
+    } else {
+      liveStartPauseBtn.textContent = "Start capture";
+      setLiveTranscriptStatus("");
+    }
+
+    // Restore existing transcript text (including while capturing), so popup
+    // collapse / tab switches don't lose what was captured so far.
+    const liveTranscriptState = await sendToContentScript(
+      tab,
+      { type: "GET_LIVE_TRANSCRIPT" },
+      { injectIfNeeded: true }
+    ).catch(() => null);
+    const existingText = String(liveTranscriptState?.text || "").trim();
+    if (liveTranscriptText) {
+      if (existingText) {
+        liveTranscriptText.textContent = existingText;
+        liveTranscriptText.classList.remove("tlx-hidden");
+      } else {
+        liveTranscriptText.textContent = "";
+        liveTranscriptText.classList.add("tlx-hidden");
+      }
+    }
+    syncLiveTranscriptEditability();
+    syncLiveClearAvailability();
+  } catch {
+    // ignore; live capture not available for this tab
+  }
 }
 
 async function onAnalyzeSelection() {
@@ -619,6 +700,102 @@ function renderTranscriptionError(error) {
 function clearTranscriptionResult() {
   transcriptionResult.innerHTML = "";
   transcriptionResult.classList.add("tlx-hidden");
+}
+
+// ============================================
+// Live transcript panel (real-time capture + transcript)
+// ============================================
+
+function appendLiveTranscriptChunk(text) {
+  if (!liveTranscriptText || !String(text || "").trim()) return;
+  const trimmed = String(text).trim();
+  liveTranscriptText.classList.remove("tlx-hidden");
+  if (liveTranscriptText.textContent.length > 0) {
+    liveTranscriptText.textContent += " " + trimmed;
+  } else {
+    liveTranscriptText.textContent = trimmed;
+  }
+  liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+}
+
+function setLiveTranscriptStatus(message, isError = false) {
+  if (!liveTranscriptStatus) return;
+  liveTranscriptStatus.textContent = message || "";
+  liveTranscriptStatus.style.color = isError ? "#b91c1c" : "";
+}
+
+async function onLiveStartPause() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    setLiveTranscriptStatus("Could not access active tab.", true);
+    return;
+  }
+
+  try {
+    if (!liveCapturing) {
+      setLiveTranscriptStatus("Starting capture...");
+      liveStartPauseBtn.disabled = true;
+      const initialText = liveTranscriptText ? liveTranscriptText.textContent : "";
+      const response = await sendToContentScript(
+        tab,
+        { type: "START_LIVE_TRANSCRIPT", payload: { initialText } },
+        { injectIfNeeded: true }
+      );
+      if (!response?.ok) throw new Error(response?.error || "Failed to start live capture");
+      liveCapturing = true;
+      livePaused = false;
+      liveStartPauseBtn.textContent = "Stop";
+      setLiveTranscriptStatus("🔴 Capturing — transcript updates every few seconds.");
+      syncLiveTranscriptEditability();
+      syncLiveClearAvailability();
+    } else {
+      const response = await sendToContentScript(tab, { type: "STOP_LIVE_TRANSCRIPT" });
+      if (!response?.ok) throw new Error(response?.error || "Failed to stop");
+      livePaused = false;
+      liveCapturing = false;
+      liveStartPauseBtn.textContent = "Start capture";
+      setLiveTranscriptStatus("Stopped.");
+      syncLiveTranscriptEditability();
+      syncLiveClearAvailability();
+    }
+  } catch (error) {
+    setLiveTranscriptStatus(`Error: ${error.message}`, true);
+    liveCapturing = false;
+    livePaused = false;
+    liveStartPauseBtn.textContent = "Start capture";
+    syncLiveTranscriptEditability();
+    syncLiveClearAvailability();
+  } finally {
+    liveStartPauseBtn.disabled = false;
+  }
+}
+
+async function onLiveTranscriptEdited() {
+  // Only treat edits as authoritative baseline when capture is stopped.
+  if (liveCapturing) return;
+  const tab = await getActiveTab();
+  if (!tab?.id || !liveTranscriptText) return;
+  const text = liveTranscriptText.textContent || "";
+  try {
+    await sendToContentScript(tab, { type: "SET_LIVE_BASELINE", payload: { text } });
+  } catch (_) {
+    // ignore; not fatal for UI editing
+  }
+}
+
+async function onLiveStop() {
+  const tab = await getActiveTab();
+  if (liveTranscriptText) {
+    liveTranscriptText.textContent = "";
+    liveTranscriptText.classList.remove("tlx-hidden");
+  }
+  // Reset baseline so new chunks appear even if capture is running.
+  if (tab?.id) {
+    try {
+      await sendToContentScript(tab, { type: "SET_LIVE_BASELINE", payload: { text: "" } });
+    } catch (_) {}
+  }
+  setLiveTranscriptStatus("Cleared.");
 }
 
 async function onAutoDetectCapture() {

@@ -16,6 +16,17 @@
         </div>
       </header>
 
+      <section class="tlx-section tlx-panel-live" id="emptyPanel">
+        <h2>Live transcript</h2>
+        <p class="tlx-muted">Play a video on the page, then start capture. Transcript updates every ~2 seconds while capture is running.</p>
+        <div id="liveTranscriptText" class="tlx-live-transcript-text" aria-live="polite"></div>
+        <p id="liveTranscriptStatus" class="tlx-muted"></p>
+        <div class="tlx-actions-row">
+          <button type="button" id="liveStartPauseBtn" class="tlx-btn tlx-btn-primary">Start capture</button>
+          <button type="button" id="liveStopBtn" class="tlx-btn tlx-btn-outline">Clear</button>
+        </div>
+      </section>
+
       <section class="tlx-section">
         <h2>Video Transcription (Voice-to-Text)</h2>
         <p class="tlx-muted">Play a video on the current page, then click below to capture and transcribe audio.</p>
