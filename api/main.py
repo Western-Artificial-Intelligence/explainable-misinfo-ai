@@ -1,6 +1,14 @@
 import logging
+import warnings
 
 from dotenv import load_dotenv
+
+# Suppress pydub's ffmpeg-not-found warning at import; audio routes need ffmpeg on PATH at runtime.
+warnings.filterwarnings(
+    "ignore",
+    message="Couldn't find ffmpeg or avconv",
+    category=RuntimeWarning,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

@@ -21,9 +21,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: {
-        prediction: "FAKE",
+        prediction: "FALSE",
         confidence: 0,
-        explanation: "No selected text found."
+        explanation: "No selected text found.",
+        sources: []
       }
     });
     return;
@@ -39,9 +40,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: {
-        prediction: "FAKE",
+        prediction: "FALSE",
         confidence: 0,
-        explanation: `TruthLens backend error: ${error.message}`
+        explanation: `TruthLens backend error: ${error.message}`,
+        sources: []
       }
     });
   }
@@ -86,6 +88,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "PREDICT_TEXT") {
+    (async () => {
+      try {
+        const result = await callPredict(message.text || "");
+        sendResponse({ ok: true, result });
+      } catch (error) {
+        sendResponse({ ok: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === "ANALYZE_TEXT") {
     (async () => {
       try {
         const result = await callAnalyze(message.text || "");
@@ -178,8 +192,8 @@ async function callPredict(text) {
   });
 
   if (!response.ok) {
-    const details = await safeReadText(response);
-    throw new Error(`Backend ${response.status}: ${details || "Unknown error"}`);
+    const errMsg = await formatBackendError(response);
+    throw new Error(errMsg);
   }
 
   const data = await response.json();
@@ -201,8 +215,8 @@ async function callAnalyze(text) {
   });
 
   if (!response.ok) {
-    const details = await safeReadText(response);
-    throw new Error(`Backend ${response.status}: ${details || "Unknown error"}`);
+    const errMsg = await formatBackendError(response);
+    throw new Error(errMsg);
   }
 
   const data = await response.json();
@@ -211,7 +225,9 @@ async function callAnalyze(text) {
 
 function normalizePredictResponse(data) {
   const rawPrediction = String(data?.prediction || data?.label || "").toUpperCase();
-  const prediction = isFakePrediction(rawPrediction) ? "FAKE" : "REAL";
+  const prediction = rawPrediction === "TRUE" || rawPrediction === "MIXED" || rawPrediction === "FALSE"
+    ? rawPrediction
+    : isFakePrediction(rawPrediction) ? "FAKE" : "REAL";
 
   const confidenceRaw = Number(data?.confidence);
   let confidence = Number.isFinite(confidenceRaw) ? confidenceRaw : 0;
@@ -222,10 +238,13 @@ function normalizePredictResponse(data) {
 
   const explanation = String(data?.explanation || "No explanation provided by backend.");
 
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+
   return {
     prediction,
     confidence,
-    explanation
+    explanation,
+    sources
   };
 }
 
@@ -244,4 +263,15 @@ async function safeReadText(response) {
   } catch (_) {
     return "";
   }
+}
+
+async function formatBackendError(response) {
+  const raw = await safeReadText(response);
+  try {
+    const json = JSON.parse(raw);
+    const detail = json?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.join(". ");
+  } catch (_) {}
+  return raw ? `Backend ${response.status}: ${raw}` : `Backend ${response.status}: Unknown error`;
 }

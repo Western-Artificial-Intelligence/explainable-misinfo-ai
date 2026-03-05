@@ -13,6 +13,7 @@ const analyzeDocumentBtn = document.getElementById("analyzeDocumentBtn");
 const documentStatus = document.getElementById("documentStatus");
 const documentResults = document.getElementById("documentResults");
 
+const backendStatus = document.getElementById("backendStatus");
 const startAudioBtn = document.getElementById("startAudioBtn");
 const stopAudioBtn = document.getElementById("stopAudioBtn");
 const audioStatus = document.getElementById("audioStatus");
@@ -54,6 +55,8 @@ async function initPopup() {
     }
   });
 
+  checkBackendStatus();
+
   const tab = await getActiveTab();
   if (!tab?.id) {
     pageStatus.textContent = "No active tab available.";
@@ -67,6 +70,28 @@ async function initPopup() {
   syncOverlayButtonText();
 }
 
+async function checkBackendStatus() {
+  if (!backendStatus) return;
+  const base = await new Promise((resolve) => {
+    chrome.storage.sync.get({ backendUrl: "http://localhost:8000" }, (items) => {
+      resolve(String(items.backendUrl || "http://localhost:8000").replace(/\/$/, ""));
+    });
+  });
+  try {
+    const r = await fetch(`${base}/healthz`, { method: "GET", signal: AbortSignal.timeout(3000) });
+    if (r.ok) {
+      backendStatus.textContent = "Backend connected";
+      backendStatus.className = "tlx-backend-status tlx-backend-ok";
+    } else {
+      backendStatus.textContent = `Backend error ${r.status}. Check server.`;
+      backendStatus.className = "tlx-backend-status tlx-backend-error";
+    }
+  } catch (e) {
+    backendStatus.textContent = "Backend not reachable. Start: uvicorn api.main:app --reload";
+    backendStatus.className = "tlx-backend-status tlx-backend-error";
+  }
+}
+
 async function onAnalyzeSelection() {
   const tab = await getActiveTab();
   if (!tab?.id) {
@@ -78,14 +103,18 @@ async function onAnalyzeSelection() {
   clearSelectionResult();
 
   try {
-    const selectionPayload = await sendToContentScript(tab, { type: "GET_SELECTED_TEXT" }, { injectIfNeeded: true });
-    const text = String(selectionPayload?.text || "").trim();
+    let selectionPayload = await sendToContentScript(tab, { type: "GET_SELECTED_TEXT" }, { injectIfNeeded: true });
+    let text = String(selectionPayload?.text || "").trim();
     if (!text) {
-      throw new Error("No highlighted text found. Highlight text on the page first.");
+      const visiblePayload = await sendToContentScript(tab, { type: "GET_VISIBLE_PRIMARY_TEXT" }, { injectIfNeeded: true });
+      text = String(visiblePayload?.text || "").trim();
+    }
+    if (!text) {
+      throw new Error("No text found. Highlight text on the page, or ensure a tweet/post is visible.");
     }
 
     const response = await chrome.runtime.sendMessage({
-      type: "PREDICT_TEXT",
+      type: "ANALYZE_TEXT",
       text
     });
     if (!response?.ok) {
@@ -206,18 +235,33 @@ async function onAnalyzeDocument() {
 
 function renderSelectionResult(result) {
   selectionResult.classList.remove("tlx-hidden");
-  const isFake = String(result?.prediction || "").toUpperCase() === "FAKE";
+  const pred = String(result?.prediction || "").toUpperCase();
+  const pillClass = pred === "FALSE" || pred === "FAKE" ? "tlx-pill-fake"
+    : pred === "MIXED" ? "tlx-pill-mixed"
+    : "tlx-pill-real";
+  const label = pred === "TRUE" || pred === "REAL" ? "TRUE" : pred === "MIXED" ? "MIXED" : "FALSE";
   const confidencePct = Math.round(Number(result?.confidence || 0) * 100);
   const explanation = escapeHtml(String(result?.explanation || ""));
+  const sources = Array.isArray(result?.sources) ? result.sources : [];
+
+  const sourcesHtml = sources.length > 0
+    ? `<div class="tlx-sources-section">
+         <div class="tlx-sources-title">Sources</div>
+         ${sources.slice(0, 5).map(s =>
+           `<a class="tlx-source-link" href="${escapeHtml(s.url || "#")}" target="_blank" rel="noopener">
+              ${escapeHtml(s.title || "Link")}
+            </a>`
+         ).join("")}
+       </div>`
+    : "";
 
   selectionResult.innerHTML = `
     <div class="tlx-result-header">
-      <span class="tlx-pill ${isFake ? "tlx-pill-fake" : "tlx-pill-real"}">
-        ${isFake ? "FAKE" : "REAL"}
-      </span>
+      <span class="tlx-pill ${pillClass}">${label}</span>
       <span class="tlx-result-confidence">${confidencePct}%</span>
     </div>
     <p class="tlx-result-explanation">${explanation}</p>
+    ${sourcesHtml}
   `;
 }
 

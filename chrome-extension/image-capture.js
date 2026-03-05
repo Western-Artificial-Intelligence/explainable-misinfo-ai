@@ -23,6 +23,7 @@ const TLX_IMAGE_STATE = {
   lastFrameHash: null,
   audioContext: null,
   analyser: null,
+  tesseractAvailable: false,
 };
 
 // ==========================================
@@ -323,7 +324,7 @@ async function startImageCapture(payload = {}) {
     }
 
     // Try to load Tesseract (optional - backend does OCR if client fails)
-    await ensureTesseractLoaded();
+    TLX_IMAGE_STATE.tesseractAvailable = await ensureTesseractLoaded();
 
     // Extract on-screen text elements
     await extractOnScreenText();
@@ -438,24 +439,29 @@ function startFrameCaptureLoop(videoElement) {
             text: null,
           };
 
-          try {
-            const ocrText = await performOCROnFrame(blob);
-            frameData.text = ocrText;
-            
-            if (ocrText && ocrText.trim().length > 0) {
-              if (!TLX_IMAGE_STATE.extractedText.includes(ocrText.trim())) {
-                TLX_IMAGE_STATE.extractedText.push(ocrText.trim());
+          if (TLX_IMAGE_STATE.tesseractAvailable) {
+            try {
+              const ocrText = await performOCROnFrame(blob);
+              frameData.text = ocrText || "";
+              if (ocrText && ocrText.trim().length > 0) {
+                if (!TLX_IMAGE_STATE.extractedText.includes(ocrText.trim())) {
+                  TLX_IMAGE_STATE.extractedText.push(ocrText.trim());
+                }
               }
+            } catch (_) {
+              frameData.text = "";
             }
-          } catch (ocrError) {
-            console.warn("[TruthLens] OCR error:", ocrError);
+          } else {
+            frameData.text = "";
           }
 
           TLX_IMAGE_STATE.extractedFrames.push(frameData);
-          console.log(
-            `[TruthLens] Frame ${TLX_IMAGE_STATE.extractedFrames.length}: ` +
-            `${frameData.text?.length || 0} chars from OCR`
-          );
+          if (TLX_IMAGE_STATE.extractedFrames.length <= 3 || TLX_IMAGE_STATE.extractedFrames.length % 5 === 0) {
+            console.log(
+              `[TruthLens] Frame ${TLX_IMAGE_STATE.extractedFrames.length}: ` +
+              `${frameData.text?.length || 0} chars from OCR`
+            );
+          }
         }
       }, 'image/jpeg', 0.65); // Slightly lower quality to reduce payload
 
@@ -491,8 +497,7 @@ async function performOCROnFrame(imageBlob) {
 
     return data.text || "";
 
-  } catch (error) {
-    console.error("[TruthLens] OCR error:", error);
+  } catch (_) {
     return "";
   }
 }
