@@ -57,10 +57,9 @@ def evaluate_checkpoint(checkpoint_path: str, config: dict, device: str = "cpu")
     # Build model skeleton and load checkpoint
     num_sources = len(set(test_ds["source_id"])) if len(test_ds) > 0 else 3
     model = DomainAdversarialClassifier(
-        encoder_name=config["model"]["backbone"],
-        hidden=768,  # typical RoBERTa hidden size; adjust if needed
+        backbone_name=config["model"]["backbone"],
         num_sources=num_sources,
-        lambda_adv=config["model"]["lambda_adv"]
+        lambda_adv=config["model"]["lambda_adv"],
     )
 
     state = torch.load(checkpoint_path, map_location=device)

@@ -506,7 +506,7 @@ def train_twophase(config_path: str, run_name: str = None, backbone: str = None)
     test_ds = ds["test"]
 
     # Model
-    num_sources = len(set(train_ds["source_id"].tolist())) if len(train_ds) > 0 else 3
+    num_sources = len(set(int(x) for x in train_ds["source_id"])) if len(train_ds) > 0 else 3
     model = DomainAdversarialClassifier(
         backbone_name=backbone,
         num_sources=num_sources,
