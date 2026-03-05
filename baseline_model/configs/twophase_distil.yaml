@@ -1,31 +1,31 @@
 model:
   backbone: distilroberta-base
   max_length: 256
-  lambda_adv: 0.5
+  lambda_adv: 0.1
 
 lora:
   enabled: false
 
 phase1:
-  epochs: 2
+  epochs: 10
   lr: 3e-4
   weight_decay: 0.01
   batch_size: 32
   warmup_ratio: 0.06
   grad_clip_norm: 1.0
-  early_stopping_patience: 2
+  early_stopping_patience: 5
   eval_every_steps: 500
 
 phase2:
-  epochs: 3
-  head_lr: 3e-4
-  encoder_top_lr: 1e-4
+  epochs: 20
+  head_lr: 1e-4
+  encoder_top_lr: 2e-5
   encoder_lr_decay: 0.9
   weight_decay: 0.01
   batch_size: 32
   warmup_ratio: 0.06
   grad_clip_norm: 1.0
-  early_stopping_patience: 2
+  early_stopping_patience: 7
 
 training:
   seed: 42
