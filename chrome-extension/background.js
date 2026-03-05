@@ -1,4 +1,4 @@
-const TRUTHLENS_API_URL = "http://localhost:8000/predict";
+const DEFAULT_API_BASE = "http://localhost:8000";
 const MENU_ID_ANALYZE_SELECTION = "truthlens-analyze-selection";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -21,16 +21,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: {
-        prediction: "FAKE",
+        prediction: "FALSE",
         confidence: 0,
-        explanation: "No selected text found."
+        explanation: "No selected text found.",
+        sources: []
       }
     });
     return;
   }
 
   try {
-    const prediction = await callPredict(selectedText);
+    const prediction = await callAnalyze(selectedText);
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: prediction
@@ -39,9 +40,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: {
-        prediction: "FAKE",
+        prediction: "FALSE",
         confidence: 0,
-        explanation: `TruthLens backend error: ${error.message}`
+        explanation: `TruthLens backend error: ${error.message}`,
+        sources: []
       }
     });
   }
@@ -89,6 +91,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const result = await callPredict(message.text || "");
+        sendResponse({ ok: true, result });
+      } catch (error) {
+        sendResponse({ ok: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === "ANALYZE_TEXT") {
+    (async () => {
+      try {
+        const result = await callAnalyze(message.text || "");
         sendResponse({ ok: true, result });
       } catch (error) {
         sendResponse({ ok: false, error: error.message });
@@ -154,13 +168,22 @@ async function analyzeBatch(items) {
   return output;
 }
 
+async function getApiBase() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ backendUrl: DEFAULT_API_BASE }, (items) => {
+      resolve(items.backendUrl.replace(/\/$/, ""));
+    });
+  });
+}
+
 async function callPredict(text) {
   const cleanText = String(text || "").trim();
   if (!cleanText) {
     throw new Error("Text cannot be empty.");
   }
 
-  const response = await fetch(TRUTHLENS_API_URL, {
+  const base = await getApiBase();
+  const response = await fetch(`${base}/predict`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -169,8 +192,31 @@ async function callPredict(text) {
   });
 
   if (!response.ok) {
-    const details = await safeReadText(response);
-    throw new Error(`Backend ${response.status}: ${details || "Unknown error"}`);
+    const errMsg = await formatBackendError(response);
+    throw new Error(errMsg);
+  }
+
+  const data = await response.json();
+  return normalizePredictResponse(data);
+}
+
+/** Ollama + web search for Analyze Selected Text. Slower, richer reasoning. */
+async function callAnalyze(text) {
+  const cleanText = String(text || "").trim();
+  if (!cleanText) {
+    throw new Error("Text cannot be empty.");
+  }
+
+  const base = await getApiBase();
+  const response = await fetch(`${base}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: cleanText })
+  });
+
+  if (!response.ok) {
+    const errMsg = await formatBackendError(response);
+    throw new Error(errMsg);
   }
 
   const data = await response.json();
@@ -179,7 +225,9 @@ async function callPredict(text) {
 
 function normalizePredictResponse(data) {
   const rawPrediction = String(data?.prediction || data?.label || "").toUpperCase();
-  const prediction = isFakePrediction(rawPrediction) ? "FAKE" : "REAL";
+  const prediction = rawPrediction === "TRUE" || rawPrediction === "MIXED" || rawPrediction === "FALSE"
+    ? rawPrediction
+    : isFakePrediction(rawPrediction) ? "FAKE" : "REAL";
 
   const confidenceRaw = Number(data?.confidence);
   let confidence = Number.isFinite(confidenceRaw) ? confidenceRaw : 0;
@@ -190,10 +238,13 @@ function normalizePredictResponse(data) {
 
   const explanation = String(data?.explanation || "No explanation provided by backend.");
 
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+
   return {
     prediction,
     confidence,
-    explanation
+    explanation,
+    sources
   };
 }
 
@@ -212,4 +263,15 @@ async function safeReadText(response) {
   } catch (_) {
     return "";
   }
+}
+
+async function formatBackendError(response) {
+  const raw = await safeReadText(response);
+  try {
+    const json = JSON.parse(raw);
+    const detail = json?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.join(". ");
+  } catch (_) {}
+  return raw ? `Backend ${response.status}: ${raw}` : `Backend ${response.status}: Unknown error`;
 }

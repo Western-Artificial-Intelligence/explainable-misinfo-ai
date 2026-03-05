@@ -24,6 +24,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  if (message.type === "GET_VISIBLE_PRIMARY_TEXT") {
+    sendResponse({
+      text: getVisiblePrimaryText()
+    });
+    return;
+  }
+
   if (message.type === "SHOW_SELECTION_RESULT") {
     showSelectionResultCard(message.payload || {});
     return;
@@ -75,19 +82,81 @@ function getSelectedText() {
   return (selection ? selection.toString() : "").trim();
 }
 
+/** Extract primary visible text from page (tweets, article, main content) without selection. */
+function getVisiblePrimaryText() {
+  const selectors = [
+    "[data-testid='tweetText']",
+    "[data-testid='tweetTextInline']",
+    "article [data-testid='tweetText']",
+    "[lang].css-1dbjc4n",
+    ".tweet-text",
+    ".status__content",
+    "article [role='article'] span[dir='auto']",
+    "article p",
+    ".post-content",
+    "[data-ad-preview='message']",
+    ".status-content",
+    ".content__body"
+  ];
+
+  for (const sel of selectors) {
+    try {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        if (!(el instanceof HTMLElement) || !isElementVisible(el)) continue;
+        const text = normalizeText(el.innerText || el.textContent || "");
+        if (text.length >= 20 && text.length <= 2000) return text;
+      }
+    } catch (_) {}
+  }
+
+  const article = document.querySelector("article");
+  if (article && isElementVisible(article)) {
+    const text = normalizeText(article.innerText || article.textContent || "");
+    if (text.length >= 30 && text.length <= 2000) return text;
+  }
+
+  const main = document.querySelector("main");
+  if (main && isElementVisible(main)) {
+    const first = main.querySelector("p, [data-testid='tweetText'], [dir='auto']");
+    if (first) {
+      const text = normalizeText(first.innerText || first.textContent || "");
+      if (text.length >= 20 && text.length <= 2000) return text;
+    }
+  }
+
+  return "";
+}
+
 function showSelectionResultCard(payload) {
   if (tlxState.selectionCard) {
     tlxState.selectionCard.remove();
     tlxState.selectionCard = null;
   }
 
-  const prediction = String(payload.prediction || "REAL").toUpperCase();
+  const prediction = String(payload.prediction || "MIXED").toUpperCase();
   const confidence = Number(payload.confidence || 0);
   const explanation = String(payload.explanation || "");
   const confidencePct = Math.round(confidence * 100);
+  const sources = Array.isArray(payload.sources) ? payload.sources : [];
+
+  const cardClass = prediction === "FALSE" || prediction === "FAKE" ? "tlx-fake"
+    : prediction === "MIXED" ? "tlx-mixed"
+    : "tlx-real";
+
+  const sourcesHtml = sources.length > 0
+    ? `<div class="tlx-card-sources">
+         <div class="tlx-card-sources-title">Sources</div>
+         ${sources.slice(0, 5).map(s =>
+           `<a class="tlx-card-source-link" href="${escapeHtml(s.url || "#")}" target="_blank" rel="noopener">
+              ${escapeHtml(s.title || "Link")}
+            </a>`
+         ).join("")}
+       </div>`
+    : "";
 
   const card = document.createElement("div");
-  card.className = `tlx-floating-card ${prediction === "FAKE" ? "tlx-fake" : "tlx-real"}`;
+  card.className = `tlx-floating-card ${cardClass}`;
   card.innerHTML = `
     <div class="tlx-card-header">
       <span class="tlx-card-badge">${prediction}</span>
@@ -95,6 +164,7 @@ function showSelectionResultCard(payload) {
     </div>
     <div class="tlx-card-confidence">Confidence: ${confidencePct}%</div>
     <div class="tlx-card-explanation">${escapeHtml(explanation)}</div>
+    ${sourcesHtml}
   `;
 
   const closeButton = card.querySelector(".tlx-close-button");

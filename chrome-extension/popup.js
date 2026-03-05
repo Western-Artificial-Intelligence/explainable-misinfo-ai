@@ -13,6 +13,7 @@ const analyzeDocumentBtn = document.getElementById("analyzeDocumentBtn");
 const documentStatus = document.getElementById("documentStatus");
 const documentResults = document.getElementById("documentResults");
 
+const backendStatus = document.getElementById("backendStatus");
 const startAudioBtn = document.getElementById("startAudioBtn");
 const stopAudioBtn = document.getElementById("stopAudioBtn");
 const audioStatus = document.getElementById("audioStatus");
@@ -54,6 +55,8 @@ async function initPopup() {
     }
   });
 
+  checkBackendStatus();
+
   const tab = await getActiveTab();
   if (!tab?.id) {
     pageStatus.textContent = "No active tab available.";
@@ -67,6 +70,28 @@ async function initPopup() {
   syncOverlayButtonText();
 }
 
+async function checkBackendStatus() {
+  if (!backendStatus) return;
+  const base = await new Promise((resolve) => {
+    chrome.storage.sync.get({ backendUrl: "http://localhost:8000" }, (items) => {
+      resolve(String(items.backendUrl || "http://localhost:8000").replace(/\/$/, ""));
+    });
+  });
+  try {
+    const r = await fetch(`${base}/healthz`, { method: "GET", signal: AbortSignal.timeout(3000) });
+    if (r.ok) {
+      backendStatus.textContent = "Backend connected";
+      backendStatus.className = "tlx-backend-status tlx-backend-ok";
+    } else {
+      backendStatus.textContent = `Backend error ${r.status}. Check server.`;
+      backendStatus.className = "tlx-backend-status tlx-backend-error";
+    }
+  } catch (e) {
+    backendStatus.textContent = "Backend not reachable. Start: uvicorn api.main:app --reload";
+    backendStatus.className = "tlx-backend-status tlx-backend-error";
+  }
+}
+
 async function onAnalyzeSelection() {
   const tab = await getActiveTab();
   if (!tab?.id) {
@@ -78,14 +103,18 @@ async function onAnalyzeSelection() {
   clearSelectionResult();
 
   try {
-    const selectionPayload = await sendToContentScript(tab, { type: "GET_SELECTED_TEXT" }, { injectIfNeeded: true });
-    const text = String(selectionPayload?.text || "").trim();
+    let selectionPayload = await sendToContentScript(tab, { type: "GET_SELECTED_TEXT" }, { injectIfNeeded: true });
+    let text = String(selectionPayload?.text || "").trim();
     if (!text) {
-      throw new Error("No highlighted text found. Highlight text on the page first.");
+      const visiblePayload = await sendToContentScript(tab, { type: "GET_VISIBLE_PRIMARY_TEXT" }, { injectIfNeeded: true });
+      text = String(visiblePayload?.text || "").trim();
+    }
+    if (!text) {
+      throw new Error("No text found. Highlight text on the page, or ensure a tweet/post is visible.");
     }
 
     const response = await chrome.runtime.sendMessage({
-      type: "PREDICT_TEXT",
+      type: "ANALYZE_TEXT",
       text
     });
     if (!response?.ok) {
@@ -206,18 +235,33 @@ async function onAnalyzeDocument() {
 
 function renderSelectionResult(result) {
   selectionResult.classList.remove("tlx-hidden");
-  const isFake = String(result?.prediction || "").toUpperCase() === "FAKE";
+  const pred = String(result?.prediction || "").toUpperCase();
+  const pillClass = pred === "FALSE" || pred === "FAKE" ? "tlx-pill-fake"
+    : pred === "MIXED" ? "tlx-pill-mixed"
+    : "tlx-pill-real";
+  const label = pred === "TRUE" || pred === "REAL" ? "TRUE" : pred === "MIXED" ? "MIXED" : "FALSE";
   const confidencePct = Math.round(Number(result?.confidence || 0) * 100);
   const explanation = escapeHtml(String(result?.explanation || ""));
+  const sources = Array.isArray(result?.sources) ? result.sources : [];
+
+  const sourcesHtml = sources.length > 0
+    ? `<div class="tlx-sources-section">
+         <div class="tlx-sources-title">Sources</div>
+         ${sources.slice(0, 5).map(s =>
+           `<a class="tlx-source-link" href="${escapeHtml(s.url || "#")}" target="_blank" rel="noopener">
+              ${escapeHtml(s.title || "Link")}
+            </a>`
+         ).join("")}
+       </div>`
+    : "";
 
   selectionResult.innerHTML = `
     <div class="tlx-result-header">
-      <span class="tlx-pill ${isFake ? "tlx-pill-fake" : "tlx-pill-real"}">
-        ${isFake ? "FAKE" : "REAL"}
-      </span>
+      <span class="tlx-pill ${pillClass}">${label}</span>
       <span class="tlx-result-confidence">${confidencePct}%</span>
     </div>
     <p class="tlx-result-explanation">${explanation}</p>
+    ${sourcesHtml}
   `;
 }
 
@@ -408,9 +452,10 @@ async function ensureContentScriptInjected(tab) {
     target: { tabId: tab.id },
     files: ["styles.css"]
   });
+  // Inject all content scripts (image/audio capture are needed for video analysis)
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    files: ["content.js"]
+    files: ["content.js", "audio-capture.js", "image-capture.js"]
   });
 }
 
@@ -641,13 +686,14 @@ async function onAutoDetectCapture() {
       throw new Error(response?.error || "Failed to analyze video");
     }
 
-    const { shouldCapture, audioAnalysis } = response.result;
+    const { shouldCapture, audioAnalysis, reason } = response.result;
+    const msg = reason || audioAnalysis?.reason || "Use audio capture for videos with voice.";
 
     if (shouldCapture) {
-      imageStatus.textContent = `📸 ${audioAnalysis.reason} - Starting image capture...`;
+      imageStatus.textContent = `📸 ${msg} - Starting image capture...`;
       await startImageCaptureInternal();
     } else {
-      imageStatus.textContent = `🔊 ${audioAnalysis.reason} - Use audio capture instead.`;
+      imageStatus.textContent = `🔊 ${msg} - Use audio capture instead.`;
       setBusy(autoDetectCaptureBtn, false, "Auto-Detect & Start");
     }
 
@@ -764,24 +810,61 @@ function renderImageAnalysisResult(result) {
   autoDetectCaptureBtn.classList.remove("tlx-hidden");
   setBusy(stopImageCaptureBtn, false, "Stop & Analyze");
 
-  imageStatus.textContent = "✅ Image analysis complete!";
-  
+  if (result.status === "no_content" || (result.frame_count === 0 && !result.captured_text?.length && !result.extracted_text)) {
+    imageStatus.textContent = "No text or frames captured.";
+    imageAnalysisResult.innerHTML = `
+      <p class="tlx-result-explanation">${escapeHtml(result.analysis?.reason || "Play the video, ensure it is visible and not muted, then try again.")}</p>
+    `;
+    imageAnalysisResult.classList.remove("tlx-hidden");
+    return;
+  }
+
+  imageStatus.textContent = "✅ Video/image analysis complete!";
+
   const frameCount = result.frame_count || 0;
-  const textExtracted = result.captured_text?.length || 0;
-  const analysisResult = result.analysis || {};
+  const capturedText = result.captured_text || result.extracted_text;
+  const textDisplay = Array.isArray(capturedText)
+    ? capturedText.join("\n")
+    : (capturedText || result.extracted_text || "No text extracted");
+  const predictions = result.misinfo_predictions || [];
+
+  let predictionsHtml = "";
+  if (predictions.length > 0) {
+    predictionsHtml = `
+      <div class="tlx-result-meta">
+        <p><strong>Misinformation Analysis:</strong></p>
+        ${predictions
+          .map(
+            (p) => {
+            const isFake = String(p.prediction || "").toUpperCase() === "FAKE";
+            const confPct = Math.round((Number(p.confidence) || 0) * 100);
+            return `
+              <div class="tlx-doc-card" style="margin: 0.5em 0;">
+                <p class="tlx-doc-paragraph">${escapeHtml((p.text || "").slice(0, 120))}${(p.text || "").length > 120 ? "…" : ""}</p>
+                <div class="tlx-result-header">
+                  <span class="tlx-pill ${isFake ? "tlx-pill-fake" : "tlx-pill-real"}">${isFake ? "MISINFO" : "REAL"}</span>
+                  <span class="tlx-result-confidence">${confPct}%</span>
+                </div>
+                <p class="tlx-result-explanation">${escapeHtml(String(p.explanation || ""))}</p>
+              </div>
+            `;
+          }
+          )
+          .join("")}
+      </div>
+    `;
+  }
 
   const html = `
     <div class="tlx-result-header">
-      <strong>Image & Text Analysis</strong>
-      <small>${frameCount} frames • ${textExtracted} text elements</small>
+      <strong>Video/Image Analysis</strong>
+      <small>${frameCount} frames • ${predictions.length} claim(s) analyzed</small>
     </div>
     <div class="tlx-result-meta">
       <p><strong>Extracted Text:</strong></p>
-      <div class="tlx-extracted-text">${escapeHtml(result.captured_text?.join('\n') || 'No text extracted')}</div>
+      <div class="tlx-extracted-text">${escapeHtml(textDisplay)}</div>
     </div>
-    <div class="tlx-result-meta">
-      <small>Request ID: ${escapeHtml(result.request_id || 'N/A')}</small>
-    </div>
+    ${predictionsHtml}
   `;
 
   imageAnalysisResult.innerHTML = html;

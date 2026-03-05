@@ -8,6 +8,7 @@ Exports:
 
 from .audio_extraction import (
     AudioExtractionPipeline,
+    AudioExtractionError,
     InvalidMediaSource,
     FileToolargeError,
     AudioExtractionFailed,
@@ -17,6 +18,7 @@ from .audio_extraction import (
 
 __all__ = [
     "AudioExtractionPipeline",
+    "AudioExtractionError",
     "InvalidMediaSource",
     "FileToolargeError",
     "AudioExtractionFailed",

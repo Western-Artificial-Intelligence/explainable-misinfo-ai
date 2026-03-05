@@ -15,6 +15,7 @@ const TLX_AUDIO_STATE = {
   mediaStream: null,
   scriptProcessor: null,
   audioChunks: [],
+  sampleRate: 44100,
   requestId: null,
   claimId: null
 };
@@ -118,10 +119,21 @@ async function stopAudioCapture() {
 
     TLX_AUDIO_STATE.isCapturing = false;
 
-    // If we have audio chunks, send for transcription
     if (TLX_AUDIO_STATE.audioChunks.length > 0) {
-      const audioBlob = new Blob(TLX_AUDIO_STATE.audioChunks, { type: 'audio/wav' });
-      await sendAudioForTranscription(audioBlob);
+      const audioBlob = createWavBlob(TLX_AUDIO_STATE.audioChunks);
+      if (audioBlob) {
+        await sendAudioForTranscription(audioBlob);
+      } else {
+        chrome.runtime.sendMessage({
+          type: "TRANSCRIPTION_ERROR",
+          payload: { error: "Failed to create audio file. Ensure the video is playing and not muted." }
+        }).catch(() => {});
+      }
+    } else {
+      chrome.runtime.sendMessage({
+        type: "TRANSCRIPTION_ERROR",
+        payload: { error: "No audio captured. Play the video and ensure it is not muted, then try again." }
+      }).catch(() => {});
     }
 
     return { message: "Audio capture stopped" };
@@ -133,7 +145,60 @@ async function stopAudioCapture() {
 }
 
 /**
- * Find the video element on TikTok page
+ * Create a valid WAV blob from PCM Int16 chunks.
+ * Sample rate comes from AudioContext (typically 44100 or 48000).
+ */
+function createWavBlob(pcmChunks) {
+  if (!pcmChunks || pcmChunks.length === 0) return null;
+
+  const sampleRate = TLX_AUDIO_STATE.sampleRate || 44100;
+  const numChannels = 1;
+  const bitsPerSample = 16;
+
+  let totalLength = 0;
+  for (let i = 0; i < pcmChunks.length; i++) {
+    totalLength += pcmChunks[i].length * 2;
+  }
+
+  const dataSize = totalLength;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  let offset = 0;
+
+  function writeStr(off, s) {
+    for (let i = 0; i < s.length; i++) {
+      view.setUint8(off + i, s.charCodeAt(i));
+    }
+  }
+
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  offset = 44;
+  for (let i = 0; i < pcmChunks.length; i++) {
+    const arr = pcmChunks[i];
+    for (let j = 0; j < arr.length; j++) {
+      view.setInt16(offset, arr[j], true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+/**
+ * Find the video element on the page (TikTok, YouTube, etc.)
  */
 function findVideoElement() {
   // TikTok uses video elements in their feed
@@ -149,10 +214,9 @@ function findVideoElement() {
 
   videoElements.forEach(video => {
     const rect = video.getBoundingClientRect();
-    const visibleArea = Math.max(0, Math.min(rect.bottom, window.innerHeight)) -
-                       Math.max(0, rect.top) *
-                       Math.max(0, Math.min(rect.right, window.innerWidth)) -
-                       Math.max(0, rect.left);
+    const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(0, rect.top));
+    const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left));
+    const visibleArea = visibleHeight * visibleWidth;
 
     if (visibleArea > maxVisibleArea) {
       maxVisibleArea = visibleArea;
@@ -171,6 +235,7 @@ async function captureAudioFromVideo(videoElement) {
   try {
     // Create audio context
     TLX_AUDIO_STATE.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    TLX_AUDIO_STATE.sampleRate = TLX_AUDIO_STATE.audioContext.sampleRate;
 
     // Create media element audio source
     const source = TLX_AUDIO_STATE.audioContext.createMediaElementAudioSource(videoElement);
@@ -241,6 +306,15 @@ async function sendAudioForTranscription(audioBlob) {
 
     const result = await response.json();
     console.log("[TruthLens] Transcription result:", result);
+
+    // Check for backend error (e.g., Whisper not installed)
+    if (result && result.error && !result.transcription) {
+      chrome.runtime.sendMessage({
+        type: "TRANSCRIPTION_ERROR",
+        payload: { error: result.error }
+      }).catch(e => console.log("Could not send to popup:", e));
+      throw new Error(result.error);
+    }
 
     // Send result to popup/background
     chrome.runtime.sendMessage({

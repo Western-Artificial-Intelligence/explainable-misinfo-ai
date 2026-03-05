@@ -3,6 +3,12 @@
   "name": "TruthLens",
   "description": "AI-powered real-time misinformation detection",
   "version": "1.0.0",
+  "web_accessible_resources": [
+    {
+      "resources": ["tesseract.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "permissions": [
     "activeTab",
     "scripting",
