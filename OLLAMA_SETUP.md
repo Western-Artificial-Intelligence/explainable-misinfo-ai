@@ -56,7 +56,67 @@ curl http://127.0.0.1:11434/api/tags
 ollama run qwen3:4b "Extract the main claim from: The Earth is flat and NASA is hiding it."
 ```
 
-## 5. Usage in TruthLens
+## 5. Backend & Frontend setup
+
+To run TruthLens end-to-end you also need to start the Python backend and the web frontend. The repository includes tasks and sample commands to make this straightforward.
+
+1. **Create a Python virtual environment and install dependencies** (run from workspace root):
+
+    ```powershell
+    python -m venv .venv
+    .\.venv\Scripts\pip install --upgrade pip
+    .\.venv\Scripts\pip install -r requirements.txt
+    ```
+
+   You may also execute the VS Code task **Python: create venv & install deps**.
+
+2. **Configure environment variables**
+
+   Edit `api/.env` and/or root `.env` (both are loaded) with the values shown earlier under the "Configure" section. Typical local settings:
+
+    ```env
+    # api/.env (or workspace root .env)
+    OLLAMA_BASE_URL=http://127.0.0.1:11434
+    OLLAMA_MODEL=qwen3:4b
+    OLLAMA_TIMEOUT_S=60
+    HOST=127.0.0.1
+    PORT=8000
+    ```
+
+   And in the frontend folder create/modify `frontend/.env`:
+
+    ```env
+    VITE_API_BASE_URL=http://127.0.0.1:8000
+    VITE_OLLAMA_KEY=                  # only required if you call Ollama cloud directly
+    ```
+
+3. **Start the backend**
+
+    ```powershell
+    cd api
+    . .\.venv\Scripts\Activate.ps1     # activate the venv
+    uvicorn main:app --reload --host 127.0.0.1 --port 8000
+    ```
+
+   Or run the **Backend: run uvicorn** VS Code task (it keeps the server in a background terminal).
+
+4. **Launch the frontend**
+
+    ```powershell
+    cd frontend
+    npm install              # one-time
+    npm run dev              # start dev server
+    ```
+
+   Alternatively use the **Frontend: npm install & dev** task.
+
+5. **Load the browser extension**
+
+   Use the **Extension: load unpacked reminder** task or manually open `chrome://extensions` → toggle developer mode → Load unpacked → point at `chrome-extension/`.
+
+With Ollama, backend, and frontend running you can click the extension's button and select text; the request will go through the backend `analyze` endpoint and you should no longer see “Failed to fetch” errors.
+
+## 6. Usage in TruthLens
 
 When Ollama is running with a compatible model:
 
