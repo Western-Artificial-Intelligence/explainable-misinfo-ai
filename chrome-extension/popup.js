@@ -21,7 +21,11 @@ const transcriptionResult = document.getElementById("transcriptionResult");
 const liveTranscriptText = document.getElementById("liveTranscriptText");
 const liveStartPauseBtn = document.getElementById("liveStartPauseBtn");
 const liveStopBtn = document.getElementById("liveStopBtn");
+const liveEvaluateBtn = document.getElementById("liveEvaluateBtn");
 const liveTranscriptStatus = document.getElementById("liveTranscriptStatus");
+const liveEssayContainer = document.getElementById("liveEssayContainer");
+const liveEssayContent = document.getElementById("liveEssayContent");
+const liveEssayToggleBtn = document.getElementById("liveEssayToggleBtn");
 
 const autoDetectCaptureBtn = document.getElementById("autoDetectCaptureBtn");
 const startImageCaptureBtn = document.getElementById("startImageCaptureBtn");
@@ -35,7 +39,75 @@ let imageCapturing = false;
 let liveCapturing = false;
 let livePaused = false; // legacy; kept for minimal diff
 
+// Live transcript word-by-word rendering (UI only).
+let liveWordTimerId = null;
+let liveWordQueue = [];
+let liveLastRenderedWordKey = "";
+const LIVE_WORD_INTERVAL_MS = 55;
+const LIVE_MAX_CHARS = 500;
+
 initPopup();
+
+function normalizeWordKey(word) {
+  return String(word || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function getLastWordKeyFromText(text) {
+  const words = String(text || "").trim().split(/\s+/g).filter(Boolean);
+  if (words.length === 0) return "";
+  return normalizeWordKey(words[words.length - 1]);
+}
+
+function stopLiveWordAnimation() {
+  if (liveWordTimerId) {
+    clearInterval(liveWordTimerId);
+    liveWordTimerId = null;
+  }
+  liveWordQueue = [];
+}
+
+function appendLiveWord(word) {
+  if (!liveTranscriptText) return;
+  const raw = String(word || "").trim();
+  if (!raw) return;
+
+  // Word-level de-dupe guard (handles occasional repeated delta boundaries).
+  const key = normalizeWordKey(raw);
+  if (key && key === liveLastRenderedWordKey) return;
+
+  liveTranscriptText.classList.remove("tlx-hidden");
+  if (liveTranscriptText.textContent && !/\s$/.test(liveTranscriptText.textContent)) {
+    liveTranscriptText.textContent += " ";
+  }
+  liveTranscriptText.textContent += raw;
+  // Enforce max length by trimming from the start (oldest characters).
+  while (liveTranscriptText.textContent.length > LIVE_MAX_CHARS) {
+    liveTranscriptText.textContent = liveTranscriptText.textContent.slice(1);
+  }
+  liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+  if (key) liveLastRenderedWordKey = key;
+}
+
+function kickLiveWordAnimation() {
+  if (liveWordTimerId) return;
+  liveWordTimerId = setInterval(() => {
+    if (!liveWordQueue.length) {
+      stopLiveWordAnimation();
+      return;
+    }
+    const next = liveWordQueue.shift();
+    appendLiveWord(next);
+  }, LIVE_WORD_INTERVAL_MS);
+}
+
+function enqueueLiveTranscriptWords(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return;
+  const words = trimmed.split(/\s+/g).filter(Boolean);
+  if (!words.length) return;
+  liveWordQueue.push(...words);
+  kickLiveWordAnimation();
+}
 
 function syncLiveTranscriptEditability() {
   if (!liveTranscriptText) return;
@@ -55,6 +127,14 @@ function syncLiveClearAvailability() {
   liveStopBtn.classList.toggle("tlx-hidden", !canClear);
 }
 
+function syncLiveEvaluateAvailability() {
+  if (!liveEvaluateBtn) return;
+  // Evaluate should only be available when NOT recording.
+  const hasText = Boolean(liveTranscriptText && String(liveTranscriptText.textContent || "").trim());
+  liveEvaluateBtn.disabled = liveCapturing || !hasText;
+  liveEvaluateBtn.classList.toggle("tlx-hidden", liveCapturing);
+}
+
 async function initPopup() {
   analyzeSelectionBtn.addEventListener("click", onAnalyzeSelection);
   analyzePageBtn.addEventListener("click", onAnalyzePage);
@@ -64,6 +144,8 @@ async function initPopup() {
   stopAudioBtn.addEventListener("click", onStopAudioCapture);
   if (liveStartPauseBtn) liveStartPauseBtn.addEventListener("click", onLiveStartPause);
   if (liveStopBtn) liveStopBtn.addEventListener("click", onLiveStop);
+  if (liveEvaluateBtn) liveEvaluateBtn.addEventListener("click", onLiveEvaluate);
+  if (liveEssayToggleBtn) liveEssayToggleBtn.addEventListener("click", onLiveEssayToggle);
   if (liveTranscriptText) liveTranscriptText.addEventListener("input", onLiveTranscriptEdited);
   autoDetectCaptureBtn.addEventListener("click", onAutoDetectCapture);
   startImageCaptureBtn.addEventListener("click", onStartImageCapture);
@@ -141,8 +223,10 @@ async function initPopup() {
         liveTranscriptText.classList.add("tlx-hidden");
       }
     }
+    liveLastRenderedWordKey = getLastWordKeyFromText(existingText);
     syncLiveTranscriptEditability();
     syncLiveClearAvailability();
+    syncLiveEvaluateAvailability();
   } catch {
     // ignore; live capture not available for this tab
   }
@@ -708,14 +792,8 @@ function clearTranscriptionResult() {
 
 function appendLiveTranscriptChunk(text) {
   if (!liveTranscriptText || !String(text || "").trim()) return;
-  const trimmed = String(text).trim();
-  liveTranscriptText.classList.remove("tlx-hidden");
-  if (liveTranscriptText.textContent.length > 0) {
-    liveTranscriptText.textContent += " " + trimmed;
-  } else {
-    liveTranscriptText.textContent = trimmed;
-  }
-  liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+  // Render delta "word-by-word" in the popup to reduce perceived overlaps.
+  enqueueLiveTranscriptWords(text);
 }
 
 function setLiveTranscriptStatus(message, isError = false) {
@@ -735,6 +813,8 @@ async function onLiveStartPause() {
     if (!liveCapturing) {
       setLiveTranscriptStatus("Starting capture...");
       liveStartPauseBtn.disabled = true;
+      stopLiveWordAnimation();
+      liveLastRenderedWordKey = getLastWordKeyFromText(liveTranscriptText ? liveTranscriptText.textContent : "");
       const initialText = liveTranscriptText ? liveTranscriptText.textContent : "";
       const response = await sendToContentScript(
         tab,
@@ -748,6 +828,7 @@ async function onLiveStartPause() {
       setLiveTranscriptStatus("🔴 Capturing — transcript updates every few seconds.");
       syncLiveTranscriptEditability();
       syncLiveClearAvailability();
+      syncLiveEvaluateAvailability();
     } else {
       const response = await sendToContentScript(tab, { type: "STOP_LIVE_TRANSCRIPT" });
       if (!response?.ok) throw new Error(response?.error || "Failed to stop");
@@ -755,16 +836,20 @@ async function onLiveStartPause() {
       liveCapturing = false;
       liveStartPauseBtn.textContent = "Start capture";
       setLiveTranscriptStatus("Stopped.");
+      stopLiveWordAnimation();
       syncLiveTranscriptEditability();
       syncLiveClearAvailability();
+      syncLiveEvaluateAvailability();
     }
   } catch (error) {
     setLiveTranscriptStatus(`Error: ${error.message}`, true);
     liveCapturing = false;
     livePaused = false;
     liveStartPauseBtn.textContent = "Start capture";
+    stopLiveWordAnimation();
     syncLiveTranscriptEditability();
     syncLiveClearAvailability();
+    syncLiveEvaluateAvailability();
   } finally {
     liveStartPauseBtn.disabled = false;
   }
@@ -773,6 +858,10 @@ async function onLiveStartPause() {
 async function onLiveTranscriptEdited() {
   // Only treat edits as authoritative baseline when capture is stopped.
   if (liveCapturing) return;
+  stopLiveWordAnimation();
+  liveLastRenderedWordKey = getLastWordKeyFromText(liveTranscriptText ? liveTranscriptText.textContent : "");
+  syncLiveEvaluateAvailability();
+  syncLiveEvaluateAvailability();
   const tab = await getActiveTab();
   if (!tab?.id || !liveTranscriptText) return;
   const text = liveTranscriptText.textContent || "";
@@ -785,17 +874,150 @@ async function onLiveTranscriptEdited() {
 
 async function onLiveStop() {
   const tab = await getActiveTab();
+  stopLiveWordAnimation();
   if (liveTranscriptText) {
     liveTranscriptText.textContent = "";
     liveTranscriptText.classList.remove("tlx-hidden");
   }
-  // Reset baseline so new chunks appear even if capture is running.
+  liveLastRenderedWordKey = "";
+  syncLiveEvaluateAvailability();
+  syncLiveEvaluateAvailability();
+  // Reset baseline (persisted) even if popup collapses immediately.
+  try {
+    chrome.runtime.sendMessage({ type: "LIVE_TRANSCRIPT_CLEAR" });
+  } catch (_) {}
+
+  // Best-effort direct update to the content script too (for immediate UI consistency).
   if (tab?.id) {
     try {
       await sendToContentScript(tab, { type: "SET_LIVE_BASELINE", payload: { text: "" } });
     } catch (_) {}
   }
   setLiveTranscriptStatus("Cleared.");
+}
+
+async function onLiveEvaluate() {
+  if (!liveEvaluateBtn || !liveTranscriptText) return;
+  const text = String(liveTranscriptText.textContent || "").trim();
+  if (!text) {
+    setLiveTranscriptStatus("Nothing to evaluate (transcript is empty).", true);
+    syncLiveEvaluateAvailability();
+    return;
+  }
+  if (liveCapturing) {
+    setLiveTranscriptStatus("Stop capture before evaluating.", true);
+    return;
+  }
+
+  const prevLabel = liveEvaluateBtn.textContent;
+  liveEvaluateBtn.disabled = true;
+  liveEvaluateBtn.textContent = "Evaluating...";
+  setLiveTranscriptStatus("Evaluating transcript…");
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "EVALUATE_TRANSCRIPT", payload: { text } });
+    if (!resp?.ok) {
+      throw new Error(resp?.error || "Evaluation failed.");
+    }
+
+    const data = resp.result || {};
+    renderLiveEssay(data);
+    const roberta = data?.roberta || {};
+    const label = roberta?.label || {};
+    const className = label?.class_name || label?.label || "";
+    const conf = Number(roberta?.confidence);
+    const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
+    const src = roberta?.inference_source ? ` • ${roberta.inference_source}` : "";
+
+    const summary = className ? `✅ ${className}${confPct ? ` (${confPct})` : ""}${src}` : "✅ Evaluation complete.";
+    setLiveTranscriptStatus(summary);
+    console.log("[TruthLens] /api/process result:", data);
+  } catch (error) {
+    setLiveTranscriptStatus(`Evaluate error: ${error.message || "Unknown error"}`, true);
+  } finally {
+    liveEvaluateBtn.textContent = prevLabel;
+    syncLiveEvaluateAvailability();
+  }
+}
+
+function extractEssaySections(result) {
+  if (!result || typeof result !== "object") return null;
+  const essay =
+    result.essay ||
+    result.llm_summary ||
+    result.summary_essay ||
+    null;
+  if (essay && typeof essay === "object") {
+    const intro = String(essay.intro || "").trim();
+    const body1 = String(essay.body1 || "").trim();
+    const body2 = String(essay.body2 || "").trim();
+    const conclusion = String(essay.conclusion || "").trim();
+    if (intro || body1 || body2 || conclusion) {
+      return { intro, body1, body2, conclusion };
+    }
+  }
+  // Fallback: build a minimal explanation from roberta label and evidence_topk, if available.
+  const roberta = result.roberta || {};
+  const label = roberta.label || {};
+  const className = String(label.class_name || label.label || "").trim();
+  const conf = Number(roberta.confidence);
+  const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
+  const status = className ? `The claim is classified as ${className}${confPct ? ` with confidence ${confPct}.` : "."}` : "";
+  const evidenceItems = (result.evidence_topk && Array.isArray(result.evidence_topk.items)) ? result.evidence_topk.items : [];
+  const topEvidence = evidenceItems.slice(0, 3).map((item) => {
+    const src = item.doc?.source || "";
+    const title = item.doc?.title || "";
+    return `• ${title}${src ? ` (${src})` : ""}`;
+  });
+  const intro = status || "";
+  const body1 = topEvidence.length ? `Key evidence:\n${topEvidence.join("\n")}` : "";
+  return { intro, body1, body2: "", conclusion: "" };
+}
+
+function renderLiveEssay(result) {
+  if (!liveEssayContainer || !liveEssayContent) return;
+  const sections = extractEssaySections(result);
+  if (!sections) {
+    liveEssayContainer.classList.add("tlx-hidden");
+    liveEssayContent.innerHTML = "";
+    return;
+  }
+
+  const parts = [];
+  if (sections.intro) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Introduction</h3><p>${escapeHtml(sections.intro)}</p></div>`
+    );
+  }
+  if (sections.body1) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Body 1</h3><p>${escapeHtml(sections.body1)}</p></div>`
+    );
+  }
+  if (sections.body2) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Body 2</h3><p>${escapeHtml(sections.body2)}</p></div>`
+    );
+  }
+  if (sections.conclusion) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Conclusion</h3><p>${escapeHtml(sections.conclusion)}</p></div>`
+    );
+  }
+
+  liveEssayContent.innerHTML = parts.join("");
+  liveEssayContainer.classList.remove("tlx-hidden");
+  liveEssayContent.style.display = "block";
+  if (liveEssayToggleBtn) {
+    liveEssayToggleBtn.textContent = "Collapse";
+  }
+}
+
+function onLiveEssayToggle() {
+  if (!liveEssayContainer || !liveEssayContent || !liveEssayToggleBtn) return;
+  const isHidden = liveEssayContent.style.display === "none";
+  liveEssayContent.style.display = isHidden ? "block" : "none";
+  liveEssayToggleBtn.textContent = isHidden ? "Collapse" : "Expand";
 }
 
 async function onAutoDetectCapture() {

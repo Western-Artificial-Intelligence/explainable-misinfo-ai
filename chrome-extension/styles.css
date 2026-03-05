@@ -57,11 +57,11 @@
 }
 
 .tlx-panel-live .tlx-live-transcript-text {
-  min-height: 100px;
-  max-height: 180px;
+  min-height: 60px;
+  max-height: 20vh;
   overflow-y: auto;
   padding: 10px;
-  margin: 8px 0;
+  margin: 6px 0 4px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
@@ -70,6 +70,50 @@
   color: #334155;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.tlx-live-essay {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.tlx-live-essay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tlx-live-essay-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tlx-live-essay-body {
+  max-height: 40vh;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1f2933;
+  padding-right: 2px;
+}
+
+.tlx-live-essay-section {
+  margin-bottom: 8px;
+}
+
+.tlx-live-essay-section h3 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.tlx-live-essay-section p {
+  margin: 0;
 }
 
 .tlx-panel-live .tlx-live-transcript-partial {

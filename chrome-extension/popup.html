@@ -18,12 +18,22 @@
 
       <section class="tlx-section tlx-panel-live" id="emptyPanel">
         <h2>Live transcript</h2>
-        <p class="tlx-muted">Play a video on the page, then start capture. Transcript updates every ~2 seconds while capture is running.</p>
+        <p class="tlx-muted tlx-hidden">Play a video on the page, then start capture. Transcript updates every ~2 seconds while capture is running.</p>
         <div id="liveTranscriptText" class="tlx-live-transcript-text" aria-live="polite"></div>
         <p id="liveTranscriptStatus" class="tlx-muted"></p>
         <div class="tlx-actions-row">
           <button type="button" id="liveStartPauseBtn" class="tlx-btn tlx-btn-primary">Start capture</button>
           <button type="button" id="liveStopBtn" class="tlx-btn tlx-btn-outline">Clear</button>
+          <button type="button" id="liveEvaluateBtn" class="tlx-btn tlx-btn-secondary">Evaluate</button>
+        </div>
+        <div id="liveEssayContainer" class="tlx-live-essay tlx-hidden">
+          <div class="tlx-live-essay-header">
+            <span class="tlx-live-essay-title">Explanation</span>
+            <button type="button" id="liveEssayToggleBtn" class="tlx-btn tlx-btn-outline" style="padding: 4px 8px; font-size: 11px;">
+              Collapse
+            </button>
+          </div>
+          <div id="liveEssayContent" class="tlx-live-essay-body"></div>
         </div>
       </section>
 

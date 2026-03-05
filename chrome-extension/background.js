@@ -85,6 +85,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  if (message.type === "LIVE_TRANSCRIPT_CLEAR") {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !tab?.url) {
+          sendResponse({ ok: false, error: "No active tab." });
+          return;
+        }
+
+        const storageKey = `tlx_live_${tab.url}`;
+        try {
+          await chrome.storage.local.set({ [storageKey]: "" });
+        } catch (_) {}
+
+        // Best-effort: also clear the in-page live state immediately.
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: "SET_LIVE_BASELINE", payload: { text: "" } });
+        } catch (_) {}
+
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === "EVALUATE_TRANSCRIPT") {
+    (async () => {
+      try {
+        const text = String(message?.payload?.text || "").trim();
+        if (!text) {
+          sendResponse({ ok: false, error: "Transcript is empty." });
+          return;
+        }
+        const result = await callProcess(text);
+        sendResponse({ ok: true, result });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === "PREDICT_TEXT") {
     (async () => {
       try {
@@ -207,6 +251,27 @@ async function callAnalyze(text) {
 
   const data = await response.json();
   return normalizePredictResponse(data);
+}
+
+async function callProcess(userClaim) {
+  const cleanText = String(userClaim || "").trim();
+  if (!cleanText) {
+    throw new Error("user_claim cannot be empty.");
+  }
+
+  const base = await getApiBase();
+  const response = await fetch(`${base}/api/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_claim: cleanText })
+  });
+
+  if (!response.ok) {
+    const details = await safeReadText(response);
+    throw new Error(`Backend ${response.status}: ${details || "Unknown error"}`);
+  }
+
+  return await response.json();
 }
 
 function normalizePredictResponse(data) {

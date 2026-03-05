@@ -34,6 +34,8 @@ const TLX_LIVE_STATE = {
   lastWindowText: ""
 };
 
+const TLX_LIVE_MAX_CHARS = 500;
+
 /**
  * Initialize audio capture listeners
  * Called when extension loads on TikTok
@@ -95,7 +97,11 @@ function initAudioCapture() {
       return false;
     }
     if (message.type === "SET_LIVE_BASELINE") {
-      TLX_LIVE_STATE.emittedText = normalizeWords(message.payload?.text || "");
+      let baseline = normalizeText(message.payload?.text || "");
+      if (baseline.length > TLX_LIVE_MAX_CHARS) {
+        baseline = baseline.slice(-TLX_LIVE_MAX_CHARS);
+      }
+      TLX_LIVE_STATE.emittedText = baseline;
       // Persist updated baseline so it survives reloads
       try {
         const storageKey = `tlx_live_${location.href}`;
@@ -358,9 +364,14 @@ async function sendLiveChunkForTranscription(audioBlob) {
   if (!text) return;
 
   // Deduplicate overlap between rolling windows (prevents repeated text spam)
-  const delta = computeDeltaTranscript(TLX_LIVE_STATE.lastWindowText, text);
+  const historyContext = tailWords(TLX_LIVE_STATE.emittedText, 120);
+  const delta = computeDeltaTranscript(historyContext, text);
   if (!delta) return;
-  TLX_LIVE_STATE.emittedText = mergeTranscript(TLX_LIVE_STATE.emittedText, delta);
+  let merged = mergeTranscript(TLX_LIVE_STATE.emittedText, delta);
+  if (merged.length > TLX_LIVE_MAX_CHARS) {
+    merged = merged.slice(-TLX_LIVE_MAX_CHARS);
+  }
+  TLX_LIVE_STATE.emittedText = merged;
   TLX_LIVE_STATE.lastWindowText = text;
   // Persist the cumulative transcript so it survives reloads
   try {
@@ -400,27 +411,52 @@ function tailWords(text, n) {
   return toks.slice(-n).join(" ");
 }
 
+function jaccardSimilarity(keysA, keysB) {
+  const a = new Set(keysA.filter(Boolean));
+  const b = new Set(keysB.filter(Boolean));
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const k of a) {
+    if (b.has(k)) inter += 1;
+  }
+  const union = a.size + b.size - inter;
+  return union ? inter / union : 0;
+}
+
 function computeDeltaTranscript(prevText, newText) {
   const prevToks = tokenizeForMatch(prevText);
   const nextToks = tokenizeForMatch(newText);
   if (nextToks.length === 0) return "";
   if (prevToks.length === 0) return nextToks.map((t) => t.raw).join(" ").trim();
 
-  // Compare suffix of prev window with prefix of next window.
+  // Compare suffix of previous context with prefix of next window.
+  // Allow small mismatches to handle ASR re-phrasing across overlapping windows.
   const prevKeys = prevToks.map((t) => t.key);
   const nextKeys = nextToks.map((t) => t.key);
 
-  const maxOverlap = Math.min(50, prevKeys.length, nextKeys.length);
-  for (let k = maxOverlap; k >= 2; k--) {
-    let ok = true;
+  const maxOverlap = Math.min(60, prevKeys.length, nextKeys.length);
+  for (let k = maxOverlap; k >= 4; k--) {
+    const mismatchBudget = Math.max(1, Math.floor(k * 0.15));
+    let mismatches = 0;
     for (let i = 0; i < k; i++) {
       if (prevKeys[prevKeys.length - k + i] !== nextKeys[i]) {
-        ok = false;
-        break;
+        mismatches += 1;
+        if (mismatches > mismatchBudget) break;
       }
     }
-    if (ok) {
-      return nextToks.slice(k).map((t) => t.raw).join(" ").trim();
+    if (mismatches <= mismatchBudget) {
+      let deltaToks = nextToks.slice(k);
+      // If the boundary repeats the last token, drop it.
+      const lastPrevKey = prevKeys[prevKeys.length - 1] || "";
+      if (deltaToks.length > 0 && deltaToks[0].key === lastPrevKey) {
+        deltaToks = deltaToks.slice(1);
+      }
+      // Cap huge deltas (helps when Whisper outputs a long re-transcription).
+      if (deltaToks.length > 30) {
+        deltaToks = deltaToks.slice(-30);
+      }
+      return deltaToks.map((t) => t.raw).join(" ").trim();
     }
   }
 
@@ -429,9 +465,26 @@ function computeDeltaTranscript(prevText, newText) {
   const nextStr = nextKeys.join(" ");
   if (prevStr.includes(nextStr)) return "";
 
-  // Otherwise emit the whole next window (rare), but cap it to last 40 tokens to avoid huge repeats.
-  const capped = nextToks.slice(-40).map((t) => t.raw).join(" ").trim();
-  return capped;
+  // Anchor-based fallback: if the beginning of the next window appears in our recent context,
+  // emit only what comes after that anchor.
+  const maxAnchor = Math.min(10, nextKeys.length);
+  for (let len = maxAnchor; len >= 5; len--) {
+    const anchor = nextKeys.slice(0, len).join(" ");
+    if (anchor && prevStr.includes(anchor)) {
+      const remainder = nextToks.slice(len).map((t) => t.raw).join(" ").trim();
+      if (!remainder) return "";
+      return remainder;
+    }
+  }
+
+  // Otherwise, emit only a short tail and suppress if it looks like a repeat of recent output.
+  const prevTailKeys = prevKeys.slice(-40);
+  const tailCount = Math.min(16, nextToks.length);
+  const tailToks = nextToks.slice(-tailCount);
+  const tailKeys = tailToks.map((t) => t.key);
+  const sim = jaccardSimilarity(tailKeys, prevTailKeys);
+  if (sim > 0.7) return "";
+  return tailToks.map((t) => t.raw).join(" ").trim();
 }
 
 function mergeTranscript(prevText, delta) {
