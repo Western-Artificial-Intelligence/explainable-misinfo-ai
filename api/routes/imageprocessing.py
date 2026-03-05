@@ -15,7 +15,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.utils.text_processor import TextCleaner, merge_text_blocks, get_text_statistics
@@ -320,70 +320,70 @@ def analyze_audio_for_silence(
 # =====================
 
 @router.post("/analyze-claim", response_model=ImageClaimAnalysisResponse)
-async def analyze_image_claim(
-    request_id: str = Form(...),
-    claim_id: str = Form(...),
-    frame_count: int = Form(default=0),
-    audio_analysis: Optional[str] = Form(None),
-    captured_text: Optional[str] = Form(None),
-    **form_data
-):
+async def analyze_image_claim(request: Request):
     """
     Analyze images and text extracted from video for misinformation.
     
-    Args:
+    Form fields:
         request_id: Unique request identifier
         claim_id: Unique claim identifier
         frame_count: Number of frames captured
         audio_analysis: JSON string of audio analysis data
         captured_text: JSON string array of captured text
-        **form_data: Image files as frame_N
+        frame_N: Image files (optional)
+        frame_N_text: Pre-extracted OCR text (optional)
         
     Returns:
         Analysis result with predictions
     """
+    import json as json_module
+
     try:
+        form = await request.form()
+
+        request_id = form.get("request_id", "")
+        claim_id = form.get("claim_id", "")
+        frame_count = int(form.get("frame_count", 0) or 0)
+        audio_analysis = form.get("audio_analysis")
+        captured_text = form.get("captured_text")
+
         # Parse audio analysis if provided
         audio_analysis_parsed = None
         if audio_analysis:
-            import json
             try:
-                audio_analysis_parsed = json.loads(audio_analysis)
-            except json.JSONDecodeError:
+                audio_analysis_parsed = json_module.loads(audio_analysis)
+            except json_module.JSONDecodeError:
                 logger.warning("Failed to parse audio analysis JSON")
-        
+
         # Parse captured text if provided
         captured_text_list = []
         if captured_text:
-            import json
             try:
-                captured_text_list = json.loads(captured_text)
-            except json.JSONDecodeError:
+                captured_text_list = json_module.loads(captured_text)
+            except json_module.JSONDecodeError:
                 logger.warning("Failed to parse captured text JSON")
-        
-        # Extract text from uploaded images
+
+        # Extract text from uploaded images and pre-extracted frame text
         extracted_texts = []
-        
+
         for i in range(frame_count):
             frame_key = f"frame_{i}"
             frame_text_key = f"frame_{i}_text"
-            
-            # Check if frame is in form data
-            if frame_key in form_data:
-                file = form_data[frame_key]
-                try:
-                    image_bytes = await file.read()
-                    text = extract_text_from_image(image_bytes)
-                    
-                    if text.strip():
-                        extracted_texts.append(text)
-                        logger.info(f"Extracted {len(text)} chars from frame {i}")
-                except Exception as e:
-                    logger.error(f"Error processing frame {i}: {e}")
-            
-            # Check if pre-extracted text is provided
-            if frame_text_key in form_data:
-                text = form_data[frame_text_key]
+
+            if frame_key in form:
+                item = form[frame_key]
+                if hasattr(item, "read"):
+                    try:
+                        image_bytes = await item.read()
+                        text = extract_text_from_image(image_bytes)
+                        if text.strip():
+                            extracted_texts.append(text)
+                            logger.info(f"Extracted {len(text)} chars from frame {i}")
+                    except Exception as e:
+                        logger.error(f"Error processing frame {i}: {e}")
+
+            if frame_text_key in form:
+                text = form.get(frame_text_key)
                 if text:
                     extracted_texts.append(str(text))
         
@@ -398,9 +398,29 @@ async def analyze_image_claim(
         
         # Get text statistics
         text_stats = get_text_statistics(final_text)
-        
-        # Analyze for misinformation
-        predictions = analyze_text_for_misinfo(final_text)
+
+        # System prompt pipeline: extract claim via LLM when available
+        predictions = []
+        try:
+            from api.services.claim_extractor import extract_claim_from_ocr
+            extracted_claim = await extract_claim_from_ocr(final_text)
+            if extracted_claim and len(extracted_claim.strip()) >= 5:
+                result = predict_text(extracted_claim)
+                label = str(result.get("label", "mixed")).lower().strip()
+                real_labels = {"real", "true", "factual", "reliable"}
+                pred = "REAL" if label in real_labels else "FAKE"
+                predictions.append({
+                    "text": extracted_claim[:200] + ("…" if len(extracted_claim) > 200 else ""),
+                    "prediction": pred,
+                    "confidence": float(result.get("confidence", 0)),
+                    "explanation": str(result.get("explanation", "")),
+                })
+        except Exception as e:
+            logger.debug("Claim extraction skipped: %s", e)
+
+        # Segment-level analysis
+        segment_predictions = analyze_text_for_misinfo(final_text)
+        predictions.extend(segment_predictions)
         
         # Prepare response
         response_data = {

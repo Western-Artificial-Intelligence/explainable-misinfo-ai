@@ -21,18 +21,28 @@
 (optional) cd downloads
 git clone https://github.com/Western-Artificial-Intelligence/explainable-misinfo-ai.git
 cd explainable-misinfo-ai
+```
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # (Windows: .venv\Scripts\activate)
+Use the helper script to initialize both Python and frontend dependencies:
 
-# Install dependencies
-pip install -U pip
-pip install -r requirements.txt
+```powershell
+# Windows PowerShell (run from repo root)
+\.\scripts\setup-env.ps1
+```
 
-# Set up auto-formatting / linting hooks
+For Unix/macOS adapt the above commands or manually create a virtual environment and
+run `pip install -r requirements.txt`.
+
+After installation you can install git hooks:
+
+```bash
 pre-commit install
 ```
+
+> VS Code users can instead run the built-in tasks defined in `.vscode/tasks.json`:
+> **Python: create venv & install deps** to bootstrap and
+> **Backend: run uvicorn** / **Frontend: npm install & dev** to start the servers.
+
 
 ---
 

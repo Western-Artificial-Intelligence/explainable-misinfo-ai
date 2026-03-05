@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..services.predictor import predict_text
@@ -83,3 +83,17 @@ def predict_text_endpoint(payload: InputText):
     logger.info("INPUT: %r", payload.text)
     logger.info("PREDICT_OUTPUT: %s", output)
     return output
+
+
+@router.post("/analyze", response_model=PredictOutput)
+async def analyze_with_reasoning(payload: InputText):
+    """
+    Analyze text using Ollama + web search only. No RoBERTa/heuristic fallback.
+    Used by Chrome extension "Analyze Selected Text".
+    """
+    from ..services.ollama_misinfo_analyzer import analyze_with_ollama
+
+    result = await analyze_with_ollama(payload.text, use_web_search=True)
+    logger.info("ANALYZE INPUT: %r", payload.text)
+    logger.info("ANALYZE OUTPUT: %s", result)
+    return result

@@ -1,0 +1,12 @@
+{
+  "name": "misinfo-chrome-extension",
+  "version": "0.1.0",
+  "description": "Chrome extension used by the Explainable Misinfo AI project",
+  "private": true,
+  "scripts": {
+    "dev": "start chrome chrome://extensions && echo Load the chrome-extension folder via 'Load unpacked'",
+    "build": "echo \"Nothing to build\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -3,15 +3,24 @@
   "name": "TruthLens",
   "description": "AI-powered real-time misinformation detection",
   "version": "1.0.0",
+  "web_accessible_resources": [
+    {
+      "resources": ["tesseract.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "permissions": [
     "activeTab",
     "scripting",
     "contextMenus",
     "storage",
-    "webRequest"
+    "webRequest",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"  
   ],
   "host_permissions": [
     "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
     "https://*/*",
     "http://*/*"
   ],

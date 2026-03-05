@@ -9,10 +9,11 @@ from api.services.model_inference import is_model_available, predict as model_pr
 logger = logging.getLogger(__name__)
 
 
-def _fallback_prediction() -> dict[str, Any]:
-    label = random.choice(["factual", "mixed", "false"])
-    confidence = round(random.uniform(0.6, 0.98), 2)
-    explanation = f"This is a placeholder explanation for '{label}' classification."
+def _fallback_prediction(text: str = "") -> dict[str, Any]:
+    """Fallback when no RoBERTa model is configured. Uses heuristics for basic analysis."""
+    from api.services.fallback_explainer import explain_fallback
+
+    label, confidence, explanation = explain_fallback(text)
     return {"label": label, "confidence": confidence, "explanation": explanation}
 
 
@@ -46,13 +47,13 @@ def _normalize_output(raw_output: Any) -> dict[str, Any]:
 
 def predict_text(text: str) -> dict[str, Any]:
     if not is_model_available():
-        logger.warning("No RoBERTa checkpoint available; using random fallback predictor.")
-        return _fallback_prediction()
+        logger.warning("No RoBERTa checkpoint available; using heuristic fallback predictor.")
+        return _fallback_prediction(text)
 
     try:
         raw_output = model_predict(claim=text)
         return _normalize_output(raw_output)
     except Exception:  # noqa: BLE001
         logger.exception("Model inference failed; returning fallback prediction.")
-        return _fallback_prediction()
+        return _fallback_prediction(text)
 
