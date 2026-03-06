@@ -1,7 +1,7 @@
 model:
   backbone: distilroberta-base
   max_length: 256
-  lambda_adv: 0.1
+  lambda_adv: 0.3
 
 lora:
   enabled: false
@@ -21,7 +21,7 @@ phase2:
   head_lr: 1e-4
   encoder_top_lr: 2e-5
   encoder_lr_decay: 0.9
-  weight_decay: 0.01
+  weight_decay: 0.05
   batch_size: 32
   warmup_ratio: 0.06
   grad_clip_norm: 1.0
