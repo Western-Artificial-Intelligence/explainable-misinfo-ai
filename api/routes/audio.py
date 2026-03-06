@@ -11,7 +11,6 @@ from typing import Optional, List
 import logging
 import os
 import tempfile
-import json
 from datetime import datetime
 import uuid
 
@@ -20,6 +19,7 @@ import importlib
 _audio_mod = importlib.import_module("api.production_pipeline.0_Audio_Extraction_VoiceToText")
 AudioExtractionPipeline = _audio_mod.AudioExtractionPipeline
 AudioExtractionError = _audio_mod.AudioExtractionError
+from ..utils.analysis_store import add_analysis_record
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/audio", tags=["audio"])
@@ -50,6 +50,37 @@ def get_whisper_model():
         logger.info("Loading direct Whisper model for /transcribe-file")
         whisper_model = whisper.load_model("base")
     return whisper_model
+
+
+def _persist_audio_record(
+    *,
+    session_id: str | None,
+    input_type: str | None,
+    source_context: str | None,
+    page_url: str | None,
+    result: dict,
+) -> None:
+    try:
+        transcription = result.get("transcription") if isinstance(result, dict) else {}
+        full_text = ""
+        if isinstance(transcription, dict):
+            full_text = str(transcription.get("full_text") or transcription.get("text") or "").strip()
+        add_analysis_record(
+            {
+                "session_id": session_id or result.get("request_id") or f"audio-{uuid.uuid4()}",
+                "input_type": input_type or "audio_transcription",
+                "input_text": full_text,
+                "transcript": full_text,
+                "page_url": page_url or "",
+                "analysis_result": result,
+                "confidence": 0.0,
+                "reasoning": "Audio transcription completed.",
+                "verdict": "MIXED",
+                "source_context": source_context or "chrome_extension",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to persist audio transcription record: %s", exc)
 
 
 class TranscriptionRequest(BaseModel):
@@ -150,6 +181,10 @@ async def transcribe_file(
     claim_id: str = Form(...),
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None),
+    page_url: Optional[str] = Form(None),
+    source_context: Optional[str] = Form("chrome_extension"),
+    input_type: Optional[str] = Form("audio_transcription"),
 ):
     """Transcribe an uploaded audio/video file.
 
@@ -216,7 +251,7 @@ async def transcribe_file(
             }
 
             logger.info("Direct Whisper transcription completed: %s (len=%d)", request_id, len(full_text))
-            return {
+            response_payload = {
                 "request_id": request_id,
                 "claim_id": claim_id,
                 "media_source": temp_path,
@@ -227,6 +262,14 @@ async def transcribe_file(
                     "version": "0.1.0",
                 },
             }
+            _persist_audio_record(
+                session_id=session_id,
+                input_type=input_type,
+                source_context=source_context,
+                page_url=page_url,
+                result=response_payload,
+            )
+            return response_payload
 
         # Video or other supported media: fall back to production pipeline
         pipeline = get_pipeline()
@@ -237,7 +280,14 @@ async def transcribe_file(
             media_type=media_type,
             language=language,
         )
-        
+
+        _persist_audio_record(
+            session_id=session_id,
+            input_type=input_type,
+            source_context=source_context,
+            page_url=page_url,
+            result=result,
+        )
         logger.info(f"File transcription completed: {request_id}")
         return result
         
@@ -287,5 +337,4 @@ async def health_check():
             "service": "audio-extraction",
             "error": str(e)
         }
-
 

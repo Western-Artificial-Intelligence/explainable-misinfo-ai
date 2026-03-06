@@ -35,6 +35,7 @@ const TLX_LIVE_STATE = {
 };
 
 const TLX_LIVE_MAX_CHARS = 500;
+const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
 
 /**
  * Initialize audio capture listeners
@@ -337,12 +338,17 @@ async function sendLiveChunkForTranscription(audioBlob) {
   const apiUrl = `${backendUrl}/api/audio/transcribe-file`;
   const requestId = `live_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const claimId = `chunk_${Date.now()}`;
+  const sessionId = await getExtensionSessionId();
 
   const formData = new FormData();
   formData.append("request_id", requestId);
   formData.append("claim_id", claimId);
   formData.append("file", audioBlob, "chunk.wav");
   formData.append("language", "en");
+  formData.append("session_id", sessionId);
+  formData.append("page_url", location.href);
+  formData.append("source_context", "chrome_extension");
+  formData.append("input_type", "live_transcript");
 
   const response = await fetch(apiUrl, { method: "POST", body: formData });
   if (!response.ok) {
@@ -686,6 +692,7 @@ async function sendAudioForTranscription(audioBlob) {
   try {
     const backendUrl = await getBackendUrl();
     const apiUrl = `${backendUrl}/api/audio/transcribe-file`;
+    const sessionId = await getExtensionSessionId();
 
     console.log(`[TruthLens] Sending audio to: ${apiUrl}`);
 
@@ -695,6 +702,10 @@ async function sendAudioForTranscription(audioBlob) {
     formData.append('claim_id', TLX_AUDIO_STATE.claimId);
     formData.append('file', audioBlob, 'tiktok_audio.wav');
     formData.append('language', 'en'); // Default to English; could be configurable
+    formData.append('session_id', sessionId);
+    formData.append('page_url', location.href);
+    formData.append('source_context', 'chrome_extension');
+    formData.append('input_type', 'audio_transcription');
 
     // Send to backend
     const response = await fetch(apiUrl, {
@@ -746,6 +757,23 @@ async function getBackendUrl() {
   return new Promise((resolve) => {
     chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8000' }, (items) => {
       resolve(items.backendUrl);
+    });
+  });
+}
+
+async function getExtensionSessionId() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [EXTENSION_SESSION_STORAGE_KEY]: "" }, async (items) => {
+      const existing = String(items?.[EXTENSION_SESSION_STORAGE_KEY] || "").trim();
+      if (existing) {
+        resolve(existing);
+        return;
+      }
+      const created = `ext_${Date.now()}_${crypto.randomUUID()}`;
+      try {
+        await chrome.storage.local.set({ [EXTENSION_SESSION_STORAGE_KEY]: created });
+      } catch (_) {}
+      resolve(created);
     });
   });
 }

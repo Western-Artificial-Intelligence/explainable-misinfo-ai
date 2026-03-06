@@ -64,6 +64,7 @@ export default defineConfig({
       "/analyze": { target: backendProxyTarget, changeOrigin: true },
       "/documents": { target: backendProxyTarget, changeOrigin: true },
       "/history": { target: backendProxyTarget, changeOrigin: true },
+      "/analysis": { target: backendProxyTarget, changeOrigin: true },
       "/api": { target: backendProxyTarget, changeOrigin: true },
     },
   },

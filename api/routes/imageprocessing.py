@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from api.utils.text_processor import TextCleaner, merge_text_blocks, get_text_statistics
 from api.services.predictor import predict_text
+from api.utils.analysis_store import add_analysis_record
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/image", tags=["image"])
@@ -315,6 +316,43 @@ def analyze_audio_for_silence(
         }
 
 
+def _persist_image_record(
+    *,
+    session_id: str,
+    page_url: str,
+    source_context: str,
+    input_type: str,
+    input_text: str,
+    response_data: dict[str, Any],
+) -> None:
+    predictions = response_data.get("misinfo_predictions")
+    first_prediction = predictions[0] if isinstance(predictions, list) and predictions else {}
+    verdict = str(first_prediction.get("prediction") or "MIXED")
+    confidence = _safe_float(first_prediction.get("confidence"), default=0.0)
+    reasoning = str(first_prediction.get("explanation") or "Image/text analysis completed.")
+    add_analysis_record(
+        {
+            "session_id": session_id or response_data.get("request_id") or "image-session",
+            "input_type": input_type or "image_text_capture",
+            "input_text": input_text,
+            "transcript": "",
+            "page_url": page_url or "",
+            "analysis_result": response_data,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "verdict": verdict,
+            "source_context": source_context or "chrome_extension",
+        }
+    )
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # =====================
 # API Endpoints
 # =====================
@@ -346,6 +384,10 @@ async def analyze_image_claim(request: Request):
         frame_count = int(form.get("frame_count", 0) or 0)
         audio_analysis = form.get("audio_analysis")
         captured_text = form.get("captured_text")
+        session_id = str(form.get("session_id", "") or "")
+        page_url = str(form.get("page_url", "") or "")
+        source_context = str(form.get("source_context", "chrome_extension") or "chrome_extension")
+        input_type = str(form.get("input_type", "image_text_capture") or "image_text_capture")
 
         # Parse audio analysis if provided
         audio_analysis_parsed = None
@@ -440,7 +482,18 @@ async def analyze_image_claim(request: Request):
                 "text_valid": cleaned_result.is_valid,
             },
         }
-        
+        try:
+            _persist_image_record(
+                session_id=session_id,
+                page_url=page_url,
+                source_context=source_context,
+                input_type=input_type,
+                input_text=final_text,
+                response_data=response_data,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to persist image analysis record: %s", exc)
+
         logger.info(f"Image analysis complete: {request_id}, predictions={len(predictions)}")
         
         return response_data
