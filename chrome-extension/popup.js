@@ -390,7 +390,9 @@ async function onAnalyzeSelection() {
 
     const response = await chrome.runtime.sendMessage({
       type: "ANALYZE_TEXT",
-      text
+      text,
+      inputType: "selected_text",
+      pageUrl: String(tab?.url || "")
     });
     if (!response?.ok) {
       throw new Error(response?.error || "Prediction failed.");
@@ -454,6 +456,7 @@ async function onToggleOverlays() {
 }
 
 async function onAnalyzeDocument() {
+  const tab = await getActiveTab();
   const file = fileInput.files?.[0] || null;
   const manualText = String(manualTextInput.value || "").trim();
 
@@ -494,7 +497,9 @@ async function onAnalyzeDocument() {
 
     const response = await chrome.runtime.sendMessage({
       type: "ANALYZE_BATCH",
-      items
+      items,
+      inputType: "document",
+      pageUrl: String(tab?.url || "")
     });
 
     if (!response?.ok) {
@@ -1152,7 +1157,15 @@ async function onLiveEvaluate() {
   showLiveLogPanel("Evaluating...", "", "", false);
 
   try {
-    const resp = await chrome.runtime.sendMessage({ type: "EVALUATE_TRANSCRIPT", payload: { text } });
+    const tab = await getActiveTab();
+    const resp = await chrome.runtime.sendMessage({
+      type: "EVALUATE_TRANSCRIPT",
+      payload: {
+        text,
+        inputType: "live_transcript",
+        pageUrl: String(tab?.url || "")
+      }
+    });
     if (!resp?.ok) {
       throw new Error(resp?.error || "Evaluation failed.");
     }

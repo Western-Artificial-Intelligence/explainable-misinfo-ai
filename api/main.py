@@ -17,7 +17,7 @@ warnings.filterwarnings(
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import classify, documents, health, history
+from .routes import analysis, classify, documents, health, history
 from .utils.history_store import get_store_mode
 
 load_dotenv()
@@ -42,6 +42,7 @@ app.include_router(health.router)
 app.include_router(classify.router)
 app.include_router(documents.router)
 app.include_router(history.router)
+app.include_router(analysis.router)
 
 
 @app.on_event("startup")

@@ -1,5 +1,32 @@
 const DEFAULT_API_BASE = "http://localhost:8000";
 const MENU_ID_ANALYZE_SELECTION = "truthlens-analyze-selection";
+const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
+
+async function getExtensionSessionId() {
+  const existing = await chrome.storage.local.get({ [EXTENSION_SESSION_STORAGE_KEY]: "" });
+  const stored = String(existing?.[EXTENSION_SESSION_STORAGE_KEY] || "").trim();
+  if (stored) return stored;
+  const created = `ext_${Date.now()}_${crypto.randomUUID()}`;
+  await chrome.storage.local.set({ [EXTENSION_SESSION_STORAGE_KEY]: created });
+  return created;
+}
+
+function buildProcessPayload(userClaim, context = {}) {
+  const cleanText = String(userClaim || "").trim();
+  const sourceContext = String(context.sourceContext || "chrome_extension");
+  const inputType = String(context.inputType || "selected_text");
+  return {
+    user_claim: cleanText,
+    session_id: String(context.sessionId || ""),
+    input_type: inputType,
+    input_text: String(context.inputText || cleanText),
+    transcript: String(context.transcript || ""),
+    page_url: String(context.pageUrl || ""),
+    source_context: sourceContext,
+    timestamp: Number(context.timestamp || Date.now()),
+    persist_result: context.persistResult !== false
+  };
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
@@ -31,7 +58,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
-    const raw = await callProcess(selectedText);
+    const raw = await callProcess(selectedText, {
+      sessionId: await getExtensionSessionId(),
+      inputType: "selected_text",
+      inputText: selectedText,
+      pageUrl: String(tab?.url || ""),
+      sourceContext: "chrome_extension",
+      persistResult: true
+    });
     const prediction = normalizeProcessResponse(raw);
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
@@ -151,6 +185,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                   payload: { line: `[TruthLens] Stream ended without result. Retrying (${attempt}/${maxAttempts - 1})…` }
                 });
               } catch (_) {}
+            },
+            {
+              sessionId: await getExtensionSessionId(),
+              inputType: String(message?.payload?.inputType || "live_transcript"),
+              inputText: text,
+              transcript: text,
+              pageUrl: String(message?.payload?.pageUrl || sender?.tab?.url || ""),
+              sourceContext: "chrome_extension",
+              persistResult: true
             }
           );
           await chrome.storage.local.set({ [STORAGE_RESULT]: result });
@@ -181,7 +224,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "ANALYZE_TEXT") {
     (async () => {
       try {
-        const raw = await callProcess(message.text || "");
+        const raw = await callProcess(message.text || "", {
+          sessionId: await getExtensionSessionId(),
+          inputType: String(message?.inputType || "selected_text"),
+          inputText: String(message?.text || ""),
+          pageUrl: String(message?.pageUrl || sender?.tab?.url || ""),
+          sourceContext: "chrome_extension",
+          persistResult: true
+        });
         const result = normalizeProcessResponse(raw);
         sendResponse({ ok: true, result });
       } catch (error) {
@@ -196,7 +246,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const items = Array.isArray(message.items) ? message.items : [];
         const tabId = sender.tab?.id;
-        const results = await analyzeBatch(items, tabId);
+        const defaultContext = {
+          sessionId: await getExtensionSessionId(),
+          inputType: String(message?.inputType || "page_analysis"),
+          pageUrl: String(message?.pageUrl || sender?.tab?.url || ""),
+          sourceContext: "chrome_extension",
+          persistResult: true
+        };
+        const results = await analyzeBatch(items, tabId, defaultContext);
         try {
           sendResponse({ ok: true, results });
         } catch (_) {
@@ -212,7 +269,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function analyzeBatch(items, tabId) {
+async function analyzeBatch(items, tabId, defaultContext = {}) {
   const output = [];
   const concurrency = 4;
   let cursor = 0;
@@ -240,7 +297,15 @@ async function analyzeBatch(items, tabId) {
       }
 
       try {
-        const raw = await callProcess(text);
+        const raw = await callProcess(text, {
+          sessionId: defaultContext.sessionId,
+          inputType: String(item?.input_type || defaultContext.inputType || "page_analysis"),
+          inputText: text,
+          transcript: String(item?.transcript || ""),
+          pageUrl: String(item?.page_url || defaultContext.pageUrl || ""),
+          sourceContext: String(defaultContext.sourceContext || "chrome_extension"),
+          persistResult: defaultContext.persistResult !== false
+        });
         const result = normalizeProcessResponse(raw);
         const entry = { id, ok: true, result };
         output[index] = entry;
@@ -313,17 +378,18 @@ async function callAnalyze(text) {
   return normalizePredictResponse(data);
 }
 
-async function callProcess(userClaim) {
+async function callProcess(userClaim, context = {}) {
   const cleanText = String(userClaim || "").trim();
   if (!cleanText) {
     throw new Error("user_claim cannot be empty.");
   }
 
   const base = await getApiBase();
+  const payload = buildProcessPayload(cleanText, context);
   const response = await fetch(`${base}/api/process`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_claim: cleanText })
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
@@ -376,16 +442,11 @@ function normalizeProcessResponse(data) {
 const STREAM_NO_RESULT_MSG = "Stream ended without result.";
 const EVALUATE_MAX_ATTEMPTS = 3;
 
-/**
- * Call streaming /api/process-stream with retry. On "Stream ended without result."
- * retries up to 2 times (3 attempts total); then throws.
- * onLogLine(line) is called for each log line; onRetry(attempt, maxAttempts) is called before a retry.
- */
-async function callProcessStreamWithRetry(userClaim, onLogLine, onRetry) {
+async function callProcessStreamWithRetry(userClaim, onLogLine, onRetry, context = {}) {
   let lastError = null;
   for (let attempt = 1; attempt <= EVALUATE_MAX_ATTEMPTS; attempt++) {
     try {
-      return await callProcessStream(userClaim, onLogLine);
+      return await callProcessStream(userClaim, onLogLine, context);
     } catch (e) {
       lastError = e;
       const msg = String(e?.message || e);
@@ -404,21 +465,18 @@ async function callProcessStreamWithRetry(userClaim, onLogLine, onRetry) {
   throw lastError || new Error(STREAM_NO_RESULT_MSG);
 }
 
-/**
- * Call streaming /api/process-stream; onLogLine(line) is called for each log line in real time.
- * Returns the final result object or throws.
- */
-async function callProcessStream(userClaim, onLogLine) {
+async function callProcessStream(userClaim, onLogLine, context = {}) {
   const cleanText = String(userClaim || "").trim();
   if (!cleanText) {
     throw new Error("user_claim cannot be empty.");
   }
 
   const base = await getApiBase();
+  const payload = buildProcessPayload(cleanText, context);
   const response = await fetch(`${base}/api/process-stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_claim: cleanText })
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
