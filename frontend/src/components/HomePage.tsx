@@ -1,6 +1,9 @@
-import { useState, useRef } from "react";
-import { ArrowRight, Puzzle, Shield, Zap, Globe, CheckCircle, XCircle, AlertCircle, ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { ArrowRight, Puzzle, Shield, Zap, Globe, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { AnalyzerSection } from "./AnalyzerSection";
+import { HistoryPanel } from "./HistoryPanel";
+import { useHistory } from "../hooks/useHistory";
+import type { HistoryEntry } from "../hooks/useHistory";
 
 export type Prediction = "TRUE" | "FALSE" | "MIXED";
 
@@ -10,6 +13,22 @@ export interface AnalysisResult {
 }
 
 export function HomePage() {
+  const { entries, addEntry, deleteEntry, clearAll } = useHistory();
+  const [restoredEntry, setRestoredEntry] = useState<HistoryEntry | null>(null);
+  const [localSaveNotice, setLocalSaveNotice] = useState("");
+
+  const handleRestore = (entry: HistoryEntry) => {
+    setRestoredEntry({ ...entry });
+    // Scroll to top of analyzer
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleResultSaved = (entry: Omit<HistoryEntry, "id" | "timestamp">) => {
+    const saved = addEntry(entry);
+    setLocalSaveNotice(`Saved locally on this device at ${new Date(saved.timestamp).toLocaleTimeString()}`);
+    window.setTimeout(() => setLocalSaveNotice(""), 3000);
+  };
+
   const features = [
     {
       icon: Zap,
@@ -28,7 +47,7 @@ export function HomePage() {
     {
       icon: Shield,
       title: "Privacy First",
-      desc: "Your text is never stored or shared. All analysis happens transiently and securely.",
+      desc: "History is stored in your browser on this device, with optional backend backup if enabled.",
       color: "text-indigo-500",
       bg: "bg-indigo-50 dark:bg-indigo-950/40",
     },
@@ -76,7 +95,18 @@ export function HomePage() {
           </div>
 
           {/* Analyzer — front and center */}
-          <AnalyzerSection />
+          <AnalyzerSection
+            onResult={handleResultSaved}
+            restoredEntry={restoredEntry}
+          />
+
+          {localSaveNotice && (
+            <div className="mt-3 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2">
+              <p className="text-sm text-emerald-700 dark:text-emerald-300" style={{ fontWeight: 600 }}>
+                {localSaveNotice}
+              </p>
+            </div>
+          )}
 
           {/* Chrome extension nudge below analyzer */}
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -96,6 +126,18 @@ export function HomePage() {
         </div>
       </section>
 
+      {/* History */}
+      <section className="py-12 border-t border-gray-200 dark:border-gray-800">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6">
+          <HistoryPanel
+            entries={entries}
+            onDelete={deleteEntry}
+            onClearAll={clearAll}
+            onRestore={handleRestore}
+          />
+        </div>
+      </section>
+
       {/* Verdict legend */}
       <section className="py-10 border-t border-gray-200 dark:border-gray-800">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -103,10 +145,7 @@ export function HomePage() {
             {verdicts.map((v) => {
               const Icon = v.icon;
               return (
-                <div
-                  key={v.label}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full ${v.bg} border border-gray-200 dark:border-gray-700 shadow-sm`}
-                >
+                <div key={v.label} className={`flex items-center gap-2 px-4 py-2 rounded-full ${v.bg} border border-gray-200 dark:border-gray-700 shadow-sm`}>
                   <Icon className={`size-4 ${v.color}`} />
                   <span className={`text-sm ${v.color}`} style={{ fontWeight: 700 }}>{v.label}</span>
                   <span className="text-xs text-gray-500 dark:text-gray-400">{v.desc}</span>
@@ -121,25 +160,18 @@ export function HomePage() {
       <section className="py-16 border-t border-gray-200 dark:border-gray-800">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="text-center mb-10">
-            <h2 className="text-gray-900 dark:text-white mb-2" style={{ fontSize: "1.75rem", fontWeight: 700 }}>
-              Why TruthLens?
-            </h2>
+            <h2 className="text-gray-900 dark:text-white mb-2" style={{ fontSize: "1.75rem", fontWeight: 700 }}>Why TruthLens?</h2>
             <p className="text-gray-500 dark:text-gray-400 text-sm">Built for speed, accuracy, and privacy.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {features.map((f) => {
               const Icon = f.icon;
               return (
-                <div
-                  key={f.title}
-                  className="group p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
-                >
+                <div key={f.title} className="group p-6 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
                   <div className={`w-11 h-11 rounded-xl ${f.bg} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
                     <Icon className={`size-5 ${f.color}`} />
                   </div>
-                  <h3 className="text-gray-900 dark:text-white mb-2" style={{ fontWeight: 600, fontSize: "1rem" }}>
-                    {f.title}
-                  </h3>
+                  <h3 className="text-gray-900 dark:text-white mb-2" style={{ fontWeight: 600, fontSize: "1rem" }}>{f.title}</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{f.desc}</p>
                 </div>
               );
@@ -154,7 +186,6 @@ export function HomePage() {
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-amber-500 to-orange-600 p-8 md:p-12 text-white shadow-xl shadow-orange-400/20">
             <div className="absolute -top-10 -right-10 w-48 h-48 bg-white/10 rounded-full blur-2xl pointer-events-none" />
             <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-white/10 rounded-full blur-2xl pointer-events-none" />
-
             <div className="relative flex flex-col md:flex-row items-center justify-between gap-6">
               <div>
                 <div className="flex items-center gap-2 mb-3">
@@ -164,15 +195,10 @@ export function HomePage() {
                 <h2 className="mb-2 text-white" style={{ fontSize: "1.75rem", fontWeight: 800, lineHeight: 1.2 }}>
                   Fact-check anywhere,<br />without switching tabs
                 </h2>
-                <p className="opacity-80 text-sm max-w-md leading-relaxed">
-                  The TruthLens extension analyzes highlighted text directly in your browser. One click. Instant verdict.
-                </p>
+                <p className="opacity-80 text-sm max-w-md leading-relaxed">The TruthLens extension analyzes highlighted text directly in your browser. One click. Instant verdict.</p>
               </div>
               <div className="flex flex-col gap-3 flex-shrink-0">
-                <a
-                  href="https://chrome.google.com/webstore"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <a href="https://chrome.google.com/webstore" target="_blank" rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-white text-orange-600 hover:bg-orange-50 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 group"
                   style={{ fontWeight: 700, fontSize: "0.95rem", minWidth: 200 }}
                 >
@@ -182,20 +208,13 @@ export function HomePage() {
                 <p className="text-center text-xs opacity-70">Works on Chrome 88+ · No sign-in needed</p>
               </div>
             </div>
-
             <div className="relative mt-8 flex flex-wrap gap-3">
               {[
                 { label: "TRUE", color: "bg-emerald-400/30 text-emerald-100 border-emerald-400/40" },
                 { label: "FALSE", color: "bg-red-400/30 text-red-100 border-red-400/40" },
                 { label: "MIXED", color: "bg-amber-400/30 text-amber-100 border-amber-400/40" },
               ].map((b) => (
-                <span
-                  key={b.label}
-                  className={`px-3 py-1 rounded-full border text-xs ${b.color}`}
-                  style={{ fontWeight: 700 }}
-                >
-                  {b.label}
-                </span>
+                <span key={b.label} className={`px-3 py-1 rounded-full border text-xs ${b.color}`} style={{ fontWeight: 700 }}>{b.label}</span>
               ))}
               <span className="text-xs opacity-60 self-center ml-1">· Verdicts appear inline on any page</span>
             </div>
