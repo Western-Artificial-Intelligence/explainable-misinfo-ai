@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "web_accessible_resources": [
     {
-      "resources": ["tesseract.min.js"],
+      "resources": ["tesseract.min.js", "capture-worklet.js"],
       "matches": ["<all_urls>"]
     }
   ],
@@ -14,10 +14,12 @@
     "scripting",
     "contextMenus",
     "storage",
-    "webRequest"
+    "webRequest",
+    "sidePanel"
   ],
   "host_permissions": [
     "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
     "https://*/*",
     "http://*/*"
   ],
@@ -27,6 +29,9 @@
   "action": {
     "default_title": "TruthLens",
     "default_popup": "popup.html"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {

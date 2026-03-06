@@ -36,10 +36,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  if (message.type === "ANALYZE_PAGE_ITEM_RESULT") {
+    const payload = message.payload || {};
+    if (payload.id && payload.ok && payload.result) {
+      const element = tlxState.elementById.get(payload.id);
+      if (element && element instanceof HTMLElement) {
+        paintOverlay(element, payload.id, payload.result);
+      }
+    }
+    return;
+  }
+
   if (message.type === "ANALYZE_PAGE") {
     analyzeVisiblePage()
-      .then((summary) => sendResponse({ ok: true, summary }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .then((summary) => {
+        try {
+          sendResponse({ ok: true, summary });
+        } catch (_) {
+          /* Channel closed (e.g. popup closed); ignore */
+        }
+      })
+      .catch((error) => {
+        try {
+          sendResponse({ ok: false, error: error.message });
+        } catch (_) {}
+      });
     return true;
   }
 
@@ -188,11 +209,15 @@ function showSelectionResultCard(payload) {
   tlxState.selectionCard = card;
 }
 
+/**
+ * Analyze text blocks currently on screen (viewport-only). Already-analyzed elements are skipped.
+ * Scroll down and click "Analyze This Page" again to fact-check newly visible content.
+ * Truncated paragraphs (partially in view) are analyzed in full.
+ */
 async function analyzeVisiblePage() {
   tlxState.overlayEnabled = true;
-  const candidates = collectAnalyzableElements();
+  const candidates = collectAnalyzableElements(true);
   if (candidates.length === 0) {
-    startMutationObserver();
     return { analyzed: 0 };
   }
 
@@ -212,11 +237,17 @@ async function analyzeVisiblePage() {
   }
 
   applyAnalysisResults(response.results || []);
-  startMutationObserver();
   return { analyzed: candidates.length };
 }
 
-function collectAnalyzableElements() {
+/**
+ * Collect text elements to analyze.
+ * @param {boolean} viewportOnly - If true, only include elements that intersect the current viewport
+ *   (including truncated paragraphs; we still analyze the full element text). Already-analyzed
+ *   elements are always skipped. Use viewportOnly so each "Analyze This Page" run checks only
+ *   what's on screen; scroll and click again to analyze newly visible content.
+ */
+function collectAnalyzableElements(viewportOnly = false) {
   const selectors = [
     "p",
     "h1",
@@ -248,6 +279,9 @@ function collectAnalyzableElements() {
       continue;
     }
     if (!isElementVisible(element)) {
+      continue;
+    }
+    if (viewportOnly && !isElementInViewport(element)) {
       continue;
     }
 
@@ -303,6 +337,11 @@ function paintOverlay(element, id, result) {
   const confidence = Number(result.confidence || 0);
   const explanation = String(result.explanation || "");
   const confidencePct = Math.round(confidence * 100);
+  const intro = String(result.intro || "").trim();
+  const body1 = String(result.body1 || "").trim();
+  const body2 = String(result.body2 || "").trim();
+  const conclusion = String(result.conclusion || "").trim();
+  const hasBodyContent = intro || body1 || body2 || conclusion;
 
   tlxState.analyzedElementIds.add(id);
   element.classList.add("tlx-analyzed");
@@ -332,6 +371,23 @@ function paintOverlay(element, id, result) {
   tooltip.className = "tlx-tooltip";
   tooltip.textContent = `Confidence: ${confidencePct}%\n${explanation}`;
   badge.appendChild(tooltip);
+
+  if (hasBodyContent) {
+    const detail = document.createElement("div");
+    detail.className = "tlx-badge-detail";
+    const parts = [];
+    if (intro) parts.push(intro);
+    if (body1) parts.push(body1);
+    if (body2) parts.push(body2);
+    if (conclusion) parts.push(conclusion);
+    detail.innerHTML = parts.map((p) => `<p class="tlx-badge-detail-p">${escapeHtml(p)}</p>`).join("");
+    badge.appendChild(detail);
+  } else if (explanation) {
+    const detail = document.createElement("div");
+    detail.className = "tlx-badge-detail";
+    detail.innerHTML = `<p class="tlx-badge-detail-p">${escapeHtml(explanation)}</p>`;
+    badge.appendChild(detail);
+  }
 
   badge.addEventListener("click", (event) => {
     event.preventDefault();
@@ -419,6 +475,19 @@ function isElementVisible(element) {
     return false;
   }
   return true;
+}
+
+/** True if element’s rect intersects the current viewport (including partially visible / truncated). */
+function isElementInViewport(element) {
+  const rect = element.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return (
+    rect.right >= 0 &&
+    rect.bottom >= 0 &&
+    rect.left <= vw &&
+    rect.top <= vh
+  );
 }
 
 function normalizeText(value) {

@@ -20,9 +20,14 @@ pydantic
 httpx
 python-multipart>=0.0.6
 aiofiles>=23.2.0
+pymongo>=4.6.0
+dnspython>=2.6.1
+certifi>=2024.0.0
 
 # UI
 streamlit>=1.28.0
+
+
 
 # Optional heavy dependencies (audio/image/explainability) are in:
 # requirements-optional.txt

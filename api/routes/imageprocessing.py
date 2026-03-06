@@ -366,7 +366,7 @@ async def analyze_image_claim(request: Request):
         # Extract text from uploaded images and pre-extracted frame text
         extracted_texts = []
 
-        for i in range(20):
+        for i in range(frame_count):
             frame_key = f"frame_{i}"
             frame_text_key = f"frame_{i}_text"
 

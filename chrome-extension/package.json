@@ -1,0 +1,15 @@
+{
+  "name": "misinfo-chrome-extension",
+  "version": "0.1.0",
+  "description": "Chrome extension used by the Explainable Misinfo AI project",
+  "private": true,
+  "scripts": {
+    "dev": "start chrome chrome://extensions && echo Load the chrome-extension folder via 'Load unpacked'",
+    "watch": "nodemon --watch . --ext js,html,css,json --ignore node_modules --exec \"echo [TruthLens] Files changed - reload the extension at chrome://extensions\"",
+    "build": "echo \"Nothing to build\""
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

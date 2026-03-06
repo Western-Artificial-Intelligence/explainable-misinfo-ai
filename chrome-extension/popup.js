@@ -19,6 +19,19 @@ const stopAudioBtn = document.getElementById("stopAudioBtn");
 const audioStatus = document.getElementById("audioStatus");
 const transcriptionResult = document.getElementById("transcriptionResult");
 
+const liveTranscriptText = document.getElementById("liveTranscriptText");
+const liveStartPauseBtn = document.getElementById("liveStartPauseBtn");
+const liveStopBtn = document.getElementById("liveStopBtn");
+const liveEvaluateBtn = document.getElementById("liveEvaluateBtn");
+const liveTranscriptStatus = document.getElementById("liveTranscriptStatus");
+const liveLogPanel = document.getElementById("liveLogPanel");
+const liveLogHeaderLeft = document.getElementById("liveLogHeaderLeft");
+const liveLogHeaderRight = document.getElementById("liveLogHeaderRight");
+const liveLogContent = document.getElementById("liveLogContent");
+const liveEssayContainer = document.getElementById("liveEssayContainer");
+const liveEssayContent = document.getElementById("liveEssayContent");
+const liveEssayToggleBtn = document.getElementById("liveEssayToggleBtn");
+
 const autoDetectCaptureBtn = document.getElementById("autoDetectCaptureBtn");
 const startImageCaptureBtn = document.getElementById("startImageCaptureBtn");
 const stopImageCaptureBtn = document.getElementById("stopImageCaptureBtn");
@@ -28,8 +41,120 @@ const imageAnalysisResult = document.getElementById("imageAnalysisResult");
 let overlaysEnabled = false;
 let audioCapturing = false;
 let imageCapturing = false;
+let liveCapturing = false;
+let livePaused = false; // legacy; kept for minimal diff
+
+// Live transcript word-by-word rendering (UI only).
+let liveWordTimerId = null;
+let liveWordQueue = [];
+let liveLastRenderedWordKey = "";
+const LIVE_WORD_INTERVAL_MS = 55;
+const LIVE_MAX_CHARS = 500;
+const STORAGE_KEY_LIVE_EVALUATE_RESULT = "truthlens_live_evaluate_result";
+const STORAGE_KEY_LIVE_EVALUATING = "truthlens_live_evaluating";
+const STORAGE_KEY_EVALUATE_STARTED_AT = "truthlens_live_evaluate_started_at";
+const STORAGE_KEY_OVERLAYS_BY_TAB = "truthlens_overlays_by_tab";
+const LIVE_EVALUATE_POLL_MS = 800;
+const LIVE_EVALUATE_POLL_TIMEOUT_MS = 45000; // 45 s: if still "evaluating", assume worker was suspended
+const LIVE_EVALUATE_STALE_MS = 90000; // 90 s: if "evaluating" started this long ago, treat as stale on open
+let liveEvaluatePollId = null;
+let liveEvaluatePollStartedAt = 0;
+/** True while we are showing "Evaluating..." and waiting for storage (so syncLiveEvaluateAvailability keeps button disabled) */
+let liveEvaluateUiLock = false;
+let liveLogExpanded = false;
 
 initPopup();
+
+function normalizeWordKey(word) {
+  return String(word || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function getLastWordKeyFromText(text) {
+  const words = String(text || "").trim().split(/\s+/g).filter(Boolean);
+  if (words.length === 0) return "";
+  return normalizeWordKey(words[words.length - 1]);
+}
+
+function stopLiveWordAnimation() {
+  if (liveWordTimerId) {
+    clearInterval(liveWordTimerId);
+    liveWordTimerId = null;
+  }
+  liveWordQueue = [];
+}
+
+function appendLiveWord(word) {
+  if (!liveTranscriptText) return;
+  const raw = String(word || "").trim();
+  if (!raw) return;
+
+  // Word-level de-dupe guard (handles occasional repeated delta boundaries).
+  const key = normalizeWordKey(raw);
+  if (key && key === liveLastRenderedWordKey) return;
+
+  liveTranscriptText.classList.remove("tlx-hidden");
+  if (liveTranscriptText.textContent && !/\s$/.test(liveTranscriptText.textContent)) {
+    liveTranscriptText.textContent += " ";
+  }
+  liveTranscriptText.textContent += raw;
+  // Enforce max length by trimming from the start (oldest characters).
+  while (liveTranscriptText.textContent.length > LIVE_MAX_CHARS) {
+    liveTranscriptText.textContent = liveTranscriptText.textContent.slice(1);
+  }
+  liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+  if (key) liveLastRenderedWordKey = key;
+}
+
+function kickLiveWordAnimation() {
+  if (liveWordTimerId) return;
+  liveWordTimerId = setInterval(() => {
+    if (!liveWordQueue.length) {
+      stopLiveWordAnimation();
+      return;
+    }
+    const next = liveWordQueue.shift();
+    appendLiveWord(next);
+  }, LIVE_WORD_INTERVAL_MS);
+}
+
+function enqueueLiveTranscriptWords(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return;
+  const words = trimmed.split(/\s+/g).filter(Boolean);
+  if (!words.length) return;
+  liveWordQueue.push(...words);
+  kickLiveWordAnimation();
+}
+
+function syncLiveTranscriptEditability() {
+  if (!liveTranscriptText) return;
+  // Editable only when capture is stopped.
+  const editable = !liveCapturing;
+  liveTranscriptText.setAttribute("contenteditable", editable ? "true" : "false");
+  liveTranscriptText.setAttribute("role", "textbox");
+  liveTranscriptText.setAttribute("aria-multiline", "true");
+  liveTranscriptText.style.outline = editable ? "1px solid rgba(148, 163, 184, 0.6)" : "";
+}
+
+function syncLiveClearAvailability() {
+  if (!liveStopBtn) return;
+  // Clear should only be available when NOT recording.
+  const canClear = !liveCapturing;
+  liveStopBtn.disabled = !canClear;
+  liveStopBtn.classList.toggle("tlx-hidden", !canClear);
+}
+
+function syncLiveEvaluateAvailability() {
+  if (!liveEvaluateBtn) return;
+  const hasText = Boolean(liveTranscriptText && String(liveTranscriptText.textContent || "").trim());
+  liveEvaluateBtn.disabled = liveCapturing || !hasText || liveEvaluateUiLock;
+  liveEvaluateBtn.classList.toggle("tlx-hidden", liveCapturing);
+  if (liveEvaluateUiLock) {
+    liveEvaluateBtn.textContent = "Evaluating...";
+  } else {
+    liveEvaluateBtn.textContent = "Evaluate";
+  }
+}
 
 async function initPopup() {
   analyzeSelectionBtn.addEventListener("click", onAnalyzeSelection);
@@ -38,6 +163,15 @@ async function initPopup() {
   analyzeDocumentBtn.addEventListener("click", onAnalyzeDocument);
   startAudioBtn.addEventListener("click", onStartAudioCapture);
   stopAudioBtn.addEventListener("click", onStopAudioCapture);
+  if (liveStartPauseBtn) liveStartPauseBtn.addEventListener("click", onLiveStartPause);
+  if (liveStopBtn) liveStopBtn.addEventListener("click", onLiveStop);
+  if (liveEvaluateBtn) liveEvaluateBtn.addEventListener("click", onLiveEvaluate);
+  if (liveEssayToggleBtn) liveEssayToggleBtn.addEventListener("click", onLiveEssayToggle);
+  if (liveLogPanel) {
+    liveLogPanel.addEventListener("click", (e) => { e.preventDefault(); toggleLiveLogExpanded(); });
+    liveLogPanel.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleLiveLogExpanded(); } });
+  }
+  if (liveTranscriptText) liveTranscriptText.addEventListener("input", onLiveTranscriptEdited);
   autoDetectCaptureBtn.addEventListener("click", onAutoDetectCapture);
   startImageCaptureBtn.addEventListener("click", onStartImageCapture);
   stopImageCaptureBtn.addEventListener("click", onStopImageCapture);
@@ -48,6 +182,25 @@ async function initPopup() {
       renderTranscriptionResult(message.payload);
     } else if (message.type === "TRANSCRIPTION_ERROR") {
       renderTranscriptionError(message.payload?.error || "Unknown error");
+    } else if (message.type === "TRANSCRIPT_CHUNK") {
+      appendLiveTranscriptChunk(message.payload?.text);
+    } else if (message.type === "LIVE_TRANSCRIPT_ERROR") {
+      const errMsg = message.payload?.error || "Chunk error";
+      setLiveTranscriptStatus(errMsg, true);
+      if (liveTranscriptText) {
+        const prefix = liveTranscriptText.textContent.trim() ? "\n\n" : "";
+        liveTranscriptText.textContent += prefix + "[Transcription failed] " + errMsg;
+        liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
+      }
+    } else if (message.type === "LIVE_TRANSCRIPT_NO_AUDIO") {
+      const hint = message.payload?.hint || "No audio in chunk. Is the video playing and unmuted?";
+      setLiveTranscriptStatus(hint, false);
+      if (liveTranscriptText && !liveTranscriptText.textContent.trim()) {
+        liveTranscriptText.textContent = "[Waiting for audio] " + hint;
+        liveTranscriptText.scrollTop = 0;
+      }
+    } else if (message.type === "LIVE_EVALUATE_LOG_LINE") {
+      appendLiveEvaluateLogLine(message.payload?.line);
     } else if (message.type === "IMAGE_ANALYSIS_COMPLETE") {
       renderImageAnalysisResult(message.payload);
     } else if (message.type === "IMAGE_ANALYSIS_ERROR") {
@@ -63,11 +216,133 @@ async function initPopup() {
     return;
   }
 
-  const status = await sendToContentScript(tab, { type: "GET_OVERLAY_STATUS" }, { injectIfNeeded: true }).catch(
-    () => null
-  );
-  overlaysEnabled = Boolean(status?.enabled);
+  const stored = await getStoredOverlaysForTab(tab.id);
+  const status = await sendToContentScript(tab, { type: "GET_OVERLAY_STATUS" }, { injectIfNeeded: true }).catch(() => null);
+  overlaysEnabled = status != null ? Boolean(status.enabled) : Boolean(stored);
+  await setStoredOverlaysForTab(tab.id, overlaysEnabled);
   syncOverlayButtonText();
+
+  // Sync live transcript button with actual capture state on the content side
+  try {
+    const liveStatus = await sendToContentScript(tab, { type: "GET_LIVE_STATUS" }, { injectIfNeeded: true }).catch(
+      () => null
+    );
+    const isLiveActive = Boolean(liveStatus?.active);
+    liveCapturing = isLiveActive;
+    if (isLiveActive) {
+      liveStartPauseBtn.textContent = "Stop";
+      setLiveTranscriptStatus("🔴 Capturing — transcript updates every few seconds.");
+    } else {
+      liveStartPauseBtn.textContent = "Start capture";
+      setLiveTranscriptStatus("");
+    }
+
+    // Restore existing transcript text (including while capturing), so popup
+    // collapse / tab switches don't lose what was captured so far.
+    const liveTranscriptState = await sendToContentScript(
+      tab,
+      { type: "GET_LIVE_TRANSCRIPT" },
+      { injectIfNeeded: true }
+    ).catch(() => null);
+    const existingText = String(liveTranscriptState?.text || "").trim();
+    if (liveTranscriptText) {
+      if (existingText) {
+        liveTranscriptText.textContent = existingText;
+        liveTranscriptText.classList.remove("tlx-hidden");
+      } else {
+        liveTranscriptText.textContent = "";
+        liveTranscriptText.classList.remove("tlx-hidden");
+      }
+    }
+    liveLastRenderedWordKey = getLastWordKeyFromText(existingText);
+    syncLiveTranscriptEditability();
+    syncLiveClearAvailability();
+    syncLiveEvaluateAvailability();
+  } catch {
+    // ignore; live capture not available for this tab
+  }
+
+  // If evaluation is in progress (e.g. panel was closed while evaluating), show "Evaluating..." and poll for result
+  try {
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEY_LIVE_EVALUATING,
+      STORAGE_KEY_LIVE_EVALUATE_RESULT,
+      STORAGE_KEY_EVALUATE_STARTED_AT
+    ]);
+    let isEvaluating = Boolean(stored[STORAGE_KEY_LIVE_EVALUATING]);
+    const startedAt = Number(stored[STORAGE_KEY_EVALUATE_STARTED_AT]) || 0;
+    const age = startedAt ? Date.now() - startedAt : 0;
+    // Stale: job was "started" long ago; worker was likely suspended, clear and don't show Evaluating
+    if (isEvaluating && age > LIVE_EVALUATE_STALE_MS) {
+      await chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATING]: false });
+      liveEvaluateUiLock = false;
+      isEvaluating = false;
+    }
+    if (isEvaluating && liveEvaluateBtn) {
+      liveEvaluateUiLock = true;
+      liveEvaluateBtn.disabled = true;
+      liveEvaluateBtn.textContent = "Evaluating...";
+      setLiveTranscriptStatus("Evaluation in progress…");
+      showLiveLogPanel("Evaluating...", "", "", false);
+      startLiveEvaluatePolling();
+      return;
+    }
+    const savedResult = stored[STORAGE_KEY_LIVE_EVALUATE_RESULT];
+    if (savedResult && liveEssayContainer && liveEssayContent) {
+      renderLiveEssay(savedResult);
+      updateLiveLogPanelFromResult(savedResult);
+    }
+    // So after collapse/reload: button reflects enabled (if has transcript and not capturing) and label "Evaluate"
+    syncLiveEvaluateAvailability();
+  } catch (_) {}
+}
+
+function stopLiveEvaluatePolling() {
+  if (liveEvaluatePollId) {
+    clearInterval(liveEvaluatePollId);
+    liveEvaluatePollId = null;
+  }
+}
+
+function startLiveEvaluatePolling() {
+  stopLiveEvaluatePolling();
+  liveEvaluatePollStartedAt = Date.now();
+  liveEvaluatePollId = setInterval(async () => {
+    try {
+      const elapsed = Date.now() - liveEvaluatePollStartedAt;
+      if (elapsed >= LIVE_EVALUATE_POLL_TIMEOUT_MS) {
+        stopLiveEvaluatePolling();
+        liveEvaluateUiLock = false;
+        chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATING]: false }).catch(() => {});
+        if (liveEvaluateBtn) {
+          liveEvaluateBtn.textContent = "Evaluate";
+          syncLiveEvaluateAvailability();
+        }
+        showLiveLogPanel("Evaluation was interrupted (panel was closed). Click Evaluate to try again.", "", "", false);
+        setLiveTranscriptStatus("Evaluation was interrupted (panel was closed). Click Evaluate to try again.", true);
+        return;
+      }
+      const stored = await chrome.storage.local.get([STORAGE_KEY_LIVE_EVALUATING, STORAGE_KEY_LIVE_EVALUATE_RESULT]);
+      if (!stored[STORAGE_KEY_LIVE_EVALUATING]) {
+        stopLiveEvaluatePolling();
+        liveEvaluateUiLock = false;
+        if (liveEvaluateBtn) {
+          liveEvaluateBtn.textContent = "Evaluate";
+          syncLiveEvaluateAvailability();
+        }
+        const result = stored[STORAGE_KEY_LIVE_EVALUATE_RESULT];
+        if (result && liveEssayContainer && liveEssayContent) {
+          renderLiveEssay(result);
+          updateLiveLogPanelFromResult(result);
+        }
+        setLiveTranscriptStatus("");
+      }
+    } catch (_) {
+      stopLiveEvaluatePolling();
+      liveEvaluateUiLock = false;
+      syncLiveEvaluateAvailability();
+    }
+  }, LIVE_EVALUATE_POLL_MS);
 }
 
 async function checkBackendStatus() {
@@ -145,6 +420,7 @@ async function onAnalyzePage() {
       throw new Error(response?.error || "Failed to analyze page.");
     }
     overlaysEnabled = true;
+    await setStoredOverlaysForTab(tab.id, true);
     syncOverlayButtonText();
     pageStatus.textContent = `Analyzed ${response.summary?.analyzed || 0} text blocks on this page.`;
   } catch (error) {
@@ -165,6 +441,7 @@ async function onToggleOverlays() {
     if (overlaysEnabled) {
       await sendToContentScript(tab, { type: "CLEAR_OVERLAYS" }, { injectIfNeeded: true });
       overlaysEnabled = false;
+      await setStoredOverlaysForTab(tab.id, false);
       pageStatus.textContent = "Overlays removed.";
     } else {
       await onAnalyzePage();
@@ -431,6 +708,20 @@ function syncOverlayButtonText() {
   toggleOverlayBtn.textContent = overlaysEnabled ? "Remove Overlays" : "Show Overlays";
 }
 
+async function getStoredOverlaysForTab(tabId) {
+  const key = STORAGE_KEY_OVERLAYS_BY_TAB;
+  const raw = await chrome.storage.local.get(key).then((o) => o[key]);
+  if (raw == null || typeof raw !== "object") return false;
+  return Boolean(raw[String(tabId)]);
+}
+
+async function setStoredOverlaysForTab(tabId, enabled) {
+  const key = STORAGE_KEY_OVERLAYS_BY_TAB;
+  const prev = await chrome.storage.local.get(key).then((o) => o[key] || {});
+  prev[String(tabId)] = enabled;
+  await chrome.storage.local.set({ [key]: prev });
+}
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
@@ -663,6 +954,304 @@ function renderTranscriptionError(error) {
 function clearTranscriptionResult() {
   transcriptionResult.innerHTML = "";
   transcriptionResult.classList.add("tlx-hidden");
+}
+
+// ============================================
+// Live transcript panel (real-time capture + transcript)
+// ============================================
+
+function appendLiveTranscriptChunk(text) {
+  if (!liveTranscriptText || !String(text || "").trim()) return;
+  // Render delta "word-by-word" in the popup to reduce perceived overlaps.
+  enqueueLiveTranscriptWords(text);
+}
+
+function setLiveTranscriptStatus(message, isError = false) {
+  if (!liveTranscriptStatus) return;
+  liveTranscriptStatus.textContent = message || "";
+  liveTranscriptStatus.style.color = isError ? "#b91c1c" : "";
+}
+
+function showLiveLogPanel(leftText, rightText, logText, expanded) {
+  if (!liveLogPanel || !liveLogHeaderLeft || !liveLogHeaderRight || !liveLogContent) return;
+  liveLogPanel.classList.remove("tlx-hidden");
+  liveLogHeaderLeft.textContent = leftText || "";
+  liveLogHeaderRight.textContent = rightText || "";
+  liveLogContent.textContent = logText || "";
+  liveLogExpanded = Boolean(expanded);
+  liveLogContent.classList.toggle("tlx-hidden", !liveLogExpanded);
+  liveLogPanel.setAttribute("aria-expanded", liveLogExpanded);
+}
+
+function hideLiveLogPanel() {
+  if (liveLogPanel) liveLogPanel.classList.add("tlx-hidden");
+  liveLogExpanded = false;
+}
+
+function updateLiveLogPanelFromResult(data) {
+  if (!data || typeof data !== "object") return;
+  const roberta = data.roberta || {};
+  const label = roberta.label || {};
+  const className = String(label.class_name || label.label || "").trim();
+  const conf = Number(roberta.confidence);
+  const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
+  const src = roberta.inference_source ? ` ${roberta.inference_source}` : "";
+  const right = className ? `${className} (${confPct})${src}` : "";
+  const logText = typeof data.backend_log === "string" ? data.backend_log : "";
+  showLiveLogPanel("Evaluation complete", right, logText, false);
+}
+
+function toggleLiveLogExpanded() {
+  if (!liveLogPanel || !liveLogContent) return;
+  liveLogExpanded = !liveLogExpanded;
+  liveLogContent.classList.toggle("tlx-hidden", !liveLogExpanded);
+  liveLogPanel.setAttribute("aria-expanded", liveLogExpanded);
+}
+
+function appendLiveEvaluateLogLine(line) {
+  if (!liveLogContent || line == null) return;
+  const text = String(line).trim();
+  if (!text) return;
+  console.log("[TruthLens]", text);
+  const hadContent = liveLogContent.textContent.length > 0;
+  if (hadContent) {
+    liveLogContent.textContent += "\n" + text;
+  } else {
+    liveLogContent.textContent = text;
+  }
+  liveLogContent.scrollTop = liveLogContent.scrollHeight;
+  if (!hadContent && liveLogPanel && !liveLogExpanded) {
+    liveLogExpanded = true;
+    liveLogContent.classList.remove("tlx-hidden");
+    liveLogPanel.setAttribute("aria-expanded", "true");
+  }
+}
+
+async function onLiveStartPause() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    setLiveTranscriptStatus("Could not access active tab.", true);
+    return;
+  }
+
+  try {
+    if (!liveCapturing) {
+      setLiveTranscriptStatus("Starting capture...");
+      liveStartPauseBtn.disabled = true;
+      stopLiveWordAnimation();
+      liveLastRenderedWordKey = getLastWordKeyFromText(liveTranscriptText ? liveTranscriptText.textContent : "");
+      const initialText = liveTranscriptText ? liveTranscriptText.textContent : "";
+      const response = await sendToContentScript(
+        tab,
+        { type: "START_LIVE_TRANSCRIPT", payload: { initialText } },
+        { injectIfNeeded: true }
+      );
+      if (!response?.ok) throw new Error(response?.error || "Failed to start live capture");
+      liveCapturing = true;
+      livePaused = false;
+      liveStartPauseBtn.textContent = "Stop";
+      setLiveTranscriptStatus("🔴 Capturing — transcript updates every few seconds.");
+      syncLiveTranscriptEditability();
+      syncLiveClearAvailability();
+      syncLiveEvaluateAvailability();
+    } else {
+      const response = await sendToContentScript(tab, { type: "STOP_LIVE_TRANSCRIPT" });
+      if (!response?.ok) throw new Error(response?.error || "Failed to stop");
+      livePaused = false;
+      liveCapturing = false;
+      liveStartPauseBtn.textContent = "Start capture";
+      setLiveTranscriptStatus("Stopped.");
+      stopLiveWordAnimation();
+      syncLiveTranscriptEditability();
+      syncLiveClearAvailability();
+      syncLiveEvaluateAvailability();
+    }
+  } catch (error) {
+    setLiveTranscriptStatus(`Error: ${error.message}`, true);
+    liveCapturing = false;
+    livePaused = false;
+    liveStartPauseBtn.textContent = "Start capture";
+    stopLiveWordAnimation();
+    syncLiveTranscriptEditability();
+    syncLiveClearAvailability();
+    syncLiveEvaluateAvailability();
+  } finally {
+    liveStartPauseBtn.disabled = false;
+  }
+}
+
+async function onLiveTranscriptEdited() {
+  // Only treat edits as authoritative baseline when capture is stopped.
+  if (liveCapturing) return;
+  stopLiveWordAnimation();
+  liveLastRenderedWordKey = getLastWordKeyFromText(liveTranscriptText ? liveTranscriptText.textContent : "");
+  syncLiveEvaluateAvailability();
+  syncLiveEvaluateAvailability();
+  const tab = await getActiveTab();
+  if (!tab?.id || !liveTranscriptText) return;
+  const text = liveTranscriptText.textContent || "";
+  try {
+    await sendToContentScript(tab, { type: "SET_LIVE_BASELINE", payload: { text } });
+  } catch (_) {
+    // ignore; not fatal for UI editing
+  }
+}
+
+async function onLiveStop() {
+  const tab = await getActiveTab();
+  stopLiveWordAnimation();
+  if (liveTranscriptText) {
+    liveTranscriptText.textContent = "";
+    liveTranscriptText.classList.remove("tlx-hidden");
+  }
+  liveLastRenderedWordKey = "";
+  syncLiveEvaluateAvailability();
+  syncLiveEvaluateAvailability();
+  // Reset baseline (persisted) even if popup collapses immediately.
+  try {
+    chrome.runtime.sendMessage({ type: "LIVE_TRANSCRIPT_CLEAR" });
+  } catch (_) {}
+
+  // Best-effort direct update to the content script too (for immediate UI consistency).
+  if (tab?.id) {
+    try {
+      await sendToContentScript(tab, { type: "SET_LIVE_BASELINE", payload: { text: "" } });
+    } catch (_) {}
+  }
+  setLiveTranscriptStatus("Cleared.");
+}
+
+function clearLiveEvaluateResult() {
+  if (liveEssayContainer) liveEssayContainer.classList.add("tlx-hidden");
+  if (liveEssayContent) liveEssayContent.innerHTML = "";
+  hideLiveLogPanel();
+  chrome.storage.local.remove(STORAGE_KEY_LIVE_EVALUATE_RESULT).catch(() => {});
+}
+
+async function onLiveEvaluate() {
+  if (!liveEvaluateBtn || !liveTranscriptText) return;
+  const text = String(liveTranscriptText.textContent || "").trim();
+  if (!text) {
+    setLiveTranscriptStatus("Nothing to evaluate (transcript is empty).", true);
+    syncLiveEvaluateAvailability();
+    return;
+  }
+  if (liveCapturing) {
+    setLiveTranscriptStatus("Stop capture before evaluating.", true);
+    return;
+  }
+
+  // Remove previous result and stored result; show new one when it arrives
+  clearLiveEvaluateResult();
+
+  liveEvaluateUiLock = true;
+  const prevLabel = liveEvaluateBtn.textContent;
+  liveEvaluateBtn.disabled = true;
+  liveEvaluateBtn.textContent = "Evaluating...";
+  setLiveTranscriptStatus("Evaluating transcript…");
+  showLiveLogPanel("Evaluating...", "", "", false);
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "EVALUATE_TRANSCRIPT", payload: { text } });
+    if (!resp?.ok) {
+      throw new Error(resp?.error || "Evaluation failed.");
+    }
+
+    const data = resp.result || {};
+    renderLiveEssay(data);
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATE_RESULT]: data });
+    } catch (_) {}
+    updateLiveLogPanelFromResult(data);
+    setLiveTranscriptStatus("");
+    console.log("[TruthLens] /api/process result:", data);
+  } catch (error) {
+    setLiveTranscriptStatus(`Evaluate error: ${error.message || "Unknown error"}`, true);
+  } finally {
+    liveEvaluateUiLock = false;
+    liveEvaluateBtn.textContent = prevLabel;
+    syncLiveEvaluateAvailability();
+  }
+}
+
+function extractEssaySections(result) {
+  if (!result || typeof result !== "object") return null;
+  const essay =
+    result.essay ||
+    result.llm_summary ||
+    result.summary_essay ||
+    null;
+  if (essay && typeof essay === "object") {
+    const intro = String(essay.intro || "").trim();
+    const body1 = String(essay.body1 || "").trim();
+    const body2 = String(essay.body2 || "").trim();
+    const conclusion = String(essay.conclusion || "").trim();
+    if (intro || body1 || body2 || conclusion) {
+      return { intro, body1, body2, conclusion };
+    }
+  }
+  // Fallback: build a minimal explanation from roberta label and evidence_topk, if available.
+  const roberta = result.roberta || {};
+  const label = roberta.label || {};
+  const className = String(label.class_name || label.label || "").trim();
+  const conf = Number(roberta.confidence);
+  const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
+  const status = className ? `The claim is classified as ${className}${confPct ? ` with confidence ${confPct}.` : "."}` : "";
+  const evidenceItems = (result.evidence_topk && Array.isArray(result.evidence_topk.items)) ? result.evidence_topk.items : [];
+  const topEvidence = evidenceItems.slice(0, 3).map((item) => {
+    const src = item.doc?.source || "";
+    const title = item.doc?.title || "";
+    return `• ${title}${src ? ` (${src})` : ""}`;
+  });
+  const intro = status || "";
+  const body1 = topEvidence.length ? `Key evidence:\n${topEvidence.join("\n")}` : "";
+  return { intro, body1, body2: "", conclusion: "" };
+}
+
+function renderLiveEssay(result) {
+  if (!liveEssayContainer || !liveEssayContent) return;
+  const sections = extractEssaySections(result);
+  if (!sections) {
+    liveEssayContainer.classList.add("tlx-hidden");
+    liveEssayContent.innerHTML = "";
+    return;
+  }
+
+  const parts = [];
+  if (sections.intro) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Introduction</h3><p>${escapeHtml(sections.intro)}</p></div>`
+    );
+  }
+  if (sections.body1) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Body 1</h3><p>${escapeHtml(sections.body1)}</p></div>`
+    );
+  }
+  if (sections.body2) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Body 2</h3><p>${escapeHtml(sections.body2)}</p></div>`
+    );
+  }
+  if (sections.conclusion) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>Conclusion</h3><p>${escapeHtml(sections.conclusion)}</p></div>`
+    );
+  }
+
+  liveEssayContent.innerHTML = parts.join("");
+  liveEssayContainer.classList.remove("tlx-hidden");
+  liveEssayContent.style.display = "block";
+  if (liveEssayToggleBtn) {
+    liveEssayToggleBtn.textContent = "Collapse";
+  }
+}
+
+function onLiveEssayToggle() {
+  if (!liveEssayContainer || !liveEssayContent || !liveEssayToggleBtn) return;
+  const isHidden = liveEssayContent.style.display === "none";
+  liveEssayContent.style.display = isHidden ? "block" : "none";
+  liveEssayToggleBtn.textContent = isHidden ? "Collapse" : "Expand";
 }
 
 async function onAutoDetectCapture() {

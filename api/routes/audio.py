@@ -13,12 +13,11 @@ import os
 import tempfile
 import json
 from datetime import datetime
+import uuid
 
 import importlib
 
-_audio_mod = importlib.import_module(
-    "api.production_pipeline.0_Audio_Extraction_VoiceToText"
-)
+_audio_mod = importlib.import_module("api.production_pipeline.0_Audio_Extraction_VoiceToText")
 AudioExtractionPipeline = _audio_mod.AudioExtractionPipeline
 AudioExtractionError = _audio_mod.AudioExtractionError
 
@@ -27,6 +26,7 @@ router = APIRouter(prefix="/api/audio", tags=["audio"])
 
 # Initialize pipeline (could be cached globally)
 pipeline = None
+whisper_model = None
 
 
 def get_pipeline():
@@ -35,6 +35,21 @@ def get_pipeline():
     if pipeline is None:
         pipeline = AudioExtractionPipeline(model_size="base")
     return pipeline
+
+
+def get_whisper_model():
+    """Lazy-load a direct Whisper model for short audio chunks.
+
+    This bypasses the heavier production_pipeline for small uploads like
+    live transcript chunks and standalone MP3 tests.
+    """
+    global whisper_model
+    if whisper_model is None:
+        import whisper
+
+        logger.info("Loading direct Whisper model for /transcribe-file")
+        whisper_model = whisper.load_model("base")
+    return whisper_model
 
 
 class TranscriptionRequest(BaseModel):
@@ -136,30 +151,29 @@ async def transcribe_file(
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
 ):
-    """
-    Transcribe an uploaded audio/video file
-    
-    Args:
-        request_id: Unique request identifier
-        claim_id: Unique claim identifier
-        file: Uploaded audio or video file
-        language: Optional language code
-        
-    Returns:
-        Transcription result with metadata
+    """Transcribe an uploaded audio/video file.
+
+    For audio files (mp3, wav, etc.) this uses a lightweight direct Whisper
+    model to improve robustness for short clips and live chunks, without
+    touching the production_pipeline. Video files still go through the
+    production pipeline.
     """
     temp_path = None
     try:
         # Save uploaded file temporarily
         temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, file.filename)
+        original_name = file.filename or "upload"
+        ext = os.path.splitext(original_name)[1].lower()
+        safe_ext = ext if ext else ".bin"
+        # Use a unique temp path per request to avoid cross-request overwrites
+        temp_name = f"tlx_{request_id}_{uuid.uuid4().hex}{safe_ext}"
+        temp_path = os.path.join(temp_dir, temp_name)
         
         with open(temp_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
         
         # Determine media type from file extension
-        ext = os.path.splitext(file.filename)[1].lower()
         if ext in {".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv"}:
             media_type = "video"
         elif ext in {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}:
@@ -170,7 +184,51 @@ async def transcribe_file(
                 detail=f"Unsupported file format: {ext}"
             )
         
-        # Process
+        # Fast path: small audio files -> direct Whisper (more tolerant of short clips)
+        if media_type == "audio":
+            model = get_whisper_model()
+            # Let Whisper handle decoding/resampling from the file path directly
+            result = model.transcribe(temp_path, language=language, fp16=False)
+
+            full_text = (result.get("text") or "").strip()
+            segments_payload = []
+            for seg in result.get("segments", []) or []:
+                text = (seg.get("text") or "").strip()
+                if not text:
+                    continue
+                segments_payload.append(
+                    {
+                        "text": text,
+                        "start_time": float(seg.get("start", 0.0)),
+                        "end_time": float(seg.get("end", 0.0)),
+                        "confidence": 0.95,
+                    }
+                )
+
+            duration_sec = float(result.get("duration", 0.0) or 0.0)
+            language_detected = str(result.get("language", language or "en"))
+
+            transcription = {
+                "full_text": full_text,
+                "segments": segments_payload,
+                "language_detected": language_detected,
+                "duration_seconds": duration_sec,
+            }
+
+            logger.info("Direct Whisper transcription completed: %s (len=%d)", request_id, len(full_text))
+            return {
+                "request_id": request_id,
+                "claim_id": claim_id,
+                "media_source": temp_path,
+                "transcription": transcription,
+                "meta": {
+                    "processed_at": datetime.utcnow().isoformat() + "Z",
+                    "model_used": "whisper-base",
+                    "version": "0.1.0",
+                },
+            }
+
+        # Video or other supported media: fall back to production pipeline
         pipeline = get_pipeline()
         result = pipeline.process(
             request_id=request_id,
@@ -229,3 +287,5 @@ async def health_check():
             "service": "audio-extraction",
             "error": str(e)
         }
+
+
