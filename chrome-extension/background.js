@@ -113,17 +113,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "EVALUATE_TRANSCRIPT") {
+    const STORAGE_EVALUATING = "truthlens_live_evaluating";
+    const STORAGE_RESULT = "truthlens_live_evaluate_result";
+    function safeSendResponse(obj) {
+      try {
+        sendResponse(obj);
+      } catch (_) {
+        // Popup closed; result is already in storage for when user reopens
+      }
+    }
     (async () => {
       try {
         const text = String(message?.payload?.text || "").trim();
         if (!text) {
-          sendResponse({ ok: false, error: "Transcript is empty." });
+          safeSendResponse({ ok: false, error: "Transcript is empty." });
           return;
         }
-        const result = await callProcess(text);
-        sendResponse({ ok: true, result });
+        await chrome.storage.local.set({
+          [STORAGE_EVALUATING]: true,
+          truthlens_live_evaluate_started_at: Date.now()
+        });
+        try {
+          const result = await callProcessStreamWithRetry(
+            text,
+            (line) => {
+              try {
+                chrome.runtime.sendMessage({ type: "LIVE_EVALUATE_LOG_LINE", payload: { line } });
+              } catch (_) {}
+            },
+            (attempt, maxAttempts) => {
+              try {
+                chrome.runtime.sendMessage({
+                  type: "LIVE_EVALUATE_LOG_LINE",
+                  payload: { line: `[TruthLens] Stream ended without result. Retrying (${attempt}/${maxAttempts - 1})…` }
+                });
+              } catch (_) {}
+            }
+          );
+          await chrome.storage.local.set({ [STORAGE_RESULT]: result });
+          safeSendResponse({ ok: true, result });
+        } finally {
+          await chrome.storage.local.set({ [STORAGE_EVALUATING]: false });
+        }
       } catch (error) {
-        sendResponse({ ok: false, error: String(error?.message || error) });
+        await chrome.storage.local.set({ [STORAGE_EVALUATING]: false });
+        safeSendResponse({ ok: false, error: String(error?.message || error) });
       }
     })();
     return true;
@@ -272,6 +306,120 @@ async function callProcess(userClaim) {
   }
 
   return await response.json();
+}
+
+const STREAM_NO_RESULT_MSG = "Stream ended without result.";
+const EVALUATE_MAX_ATTEMPTS = 3;
+
+/**
+ * Call streaming /api/process-stream with retry. On "Stream ended without result."
+ * retries up to 2 times (3 attempts total); then throws.
+ * onLogLine(line) is called for each log line; onRetry(attempt, maxAttempts) is called before a retry.
+ */
+async function callProcessStreamWithRetry(userClaim, onLogLine, onRetry) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= EVALUATE_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callProcessStream(userClaim, onLogLine);
+    } catch (e) {
+      lastError = e;
+      const msg = String(e?.message || e);
+      const isNoResult = msg.includes("Stream ended without result");
+      if (attempt < EVALUATE_MAX_ATTEMPTS && isNoResult) {
+        if (typeof onRetry === "function") {
+          try {
+            onRetry(attempt, EVALUATE_MAX_ATTEMPTS);
+          } catch (_) {}
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError || new Error(STREAM_NO_RESULT_MSG);
+}
+
+/**
+ * Call streaming /api/process-stream; onLogLine(line) is called for each log line in real time.
+ * Returns the final result object or throws.
+ */
+async function callProcessStream(userClaim, onLogLine) {
+  const cleanText = String(userClaim || "").trim();
+  if (!cleanText) {
+    throw new Error("user_claim cannot be empty.");
+  }
+
+  const base = await getApiBase();
+  const response = await fetch(`${base}/api/process-stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_claim: cleanText })
+  });
+
+  if (!response.ok) {
+    const details = await safeReadText(response);
+    throw new Error(`Backend ${response.status}: ${details || "Unknown error"}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+  let errorMessage = null;
+
+  function processMessage(msg) {
+    const lines = msg.split("\n");
+    let eventType = null;
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5));
+      }
+    }
+    const dataStr = dataLines.join("\n").trim();
+    if (!dataStr) return;
+    try {
+      const payload = JSON.parse(dataStr);
+      if (payload.log !== undefined && typeof onLogLine === "function") {
+        onLogLine(payload.log);
+      }
+      if (eventType === "result") {
+        result = payload;
+      }
+      if (eventType === "error" && payload.error) {
+        errorMessage = payload.error;
+      }
+    } catch (_) {
+      if (eventType === "result") {
+        result = dataStr;
+      }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const message = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      processMessage(message);
+    }
+  }
+  if (buffer.trim()) {
+    processMessage(buffer);
+  }
+
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+  if (result === null) {
+    throw new Error(STREAM_NO_RESULT_MSG);
+  }
+  return result;
 }
 
 function normalizePredictResponse(data) {

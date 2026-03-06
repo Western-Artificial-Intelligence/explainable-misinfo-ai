@@ -101,6 +101,55 @@
   padding-right: 2px;
 }
 
+/* Live evaluation log panel (collapsed: one line; expanded: full log) */
+.tlx-live-log-panel {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tlx-live-log-panel:hover {
+  background: #f1f5f9;
+}
+
+.tlx-live-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tlx-live-log-left {
+  color: #334155;
+  font-weight: 500;
+}
+
+.tlx-live-log-right {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tlx-live-log-content {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 28vh;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.4;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tlx-live-essay-section {
   margin-bottom: 8px;
 }

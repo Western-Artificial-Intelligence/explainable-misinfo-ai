@@ -21,6 +21,13 @@
         <p class="tlx-muted tlx-hidden">Play a video on the page, then start capture. Transcript updates every ~2 seconds while capture is running.</p>
         <div id="liveTranscriptText" class="tlx-live-transcript-text" aria-live="polite"></div>
         <p id="liveTranscriptStatus" class="tlx-muted"></p>
+        <div id="liveLogPanel" class="tlx-live-log-panel tlx-hidden" role="button" tabindex="0" aria-expanded="false" aria-label="Evaluation log (click to expand)">
+          <div class="tlx-live-log-header">
+            <span id="liveLogHeaderLeft" class="tlx-live-log-left"></span>
+            <span id="liveLogHeaderRight" class="tlx-live-log-right"></span>
+          </div>
+          <pre id="liveLogContent" class="tlx-live-log-content tlx-hidden"></pre>
+        </div>
         <div class="tlx-actions-row">
           <button type="button" id="liveStartPauseBtn" class="tlx-btn tlx-btn-primary">Start capture</button>
           <button type="button" id="liveStopBtn" class="tlx-btn tlx-btn-outline">Clear</button>

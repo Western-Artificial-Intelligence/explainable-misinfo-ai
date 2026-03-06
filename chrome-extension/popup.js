@@ -23,6 +23,10 @@ const liveStartPauseBtn = document.getElementById("liveStartPauseBtn");
 const liveStopBtn = document.getElementById("liveStopBtn");
 const liveEvaluateBtn = document.getElementById("liveEvaluateBtn");
 const liveTranscriptStatus = document.getElementById("liveTranscriptStatus");
+const liveLogPanel = document.getElementById("liveLogPanel");
+const liveLogHeaderLeft = document.getElementById("liveLogHeaderLeft");
+const liveLogHeaderRight = document.getElementById("liveLogHeaderRight");
+const liveLogContent = document.getElementById("liveLogContent");
 const liveEssayContainer = document.getElementById("liveEssayContainer");
 const liveEssayContent = document.getElementById("liveEssayContent");
 const liveEssayToggleBtn = document.getElementById("liveEssayToggleBtn");
@@ -45,6 +49,17 @@ let liveWordQueue = [];
 let liveLastRenderedWordKey = "";
 const LIVE_WORD_INTERVAL_MS = 55;
 const LIVE_MAX_CHARS = 500;
+const STORAGE_KEY_LIVE_EVALUATE_RESULT = "truthlens_live_evaluate_result";
+const STORAGE_KEY_LIVE_EVALUATING = "truthlens_live_evaluating";
+const STORAGE_KEY_EVALUATE_STARTED_AT = "truthlens_live_evaluate_started_at";
+const LIVE_EVALUATE_POLL_MS = 800;
+const LIVE_EVALUATE_POLL_TIMEOUT_MS = 45000; // 45 s: if still "evaluating", assume worker was suspended
+const LIVE_EVALUATE_STALE_MS = 90000; // 90 s: if "evaluating" started this long ago, treat as stale on open
+let liveEvaluatePollId = null;
+let liveEvaluatePollStartedAt = 0;
+/** True while we are showing "Evaluating..." and waiting for storage (so syncLiveEvaluateAvailability keeps button disabled) */
+let liveEvaluateUiLock = false;
+let liveLogExpanded = false;
 
 initPopup();
 
@@ -129,10 +144,14 @@ function syncLiveClearAvailability() {
 
 function syncLiveEvaluateAvailability() {
   if (!liveEvaluateBtn) return;
-  // Evaluate should only be available when NOT recording.
   const hasText = Boolean(liveTranscriptText && String(liveTranscriptText.textContent || "").trim());
-  liveEvaluateBtn.disabled = liveCapturing || !hasText;
+  liveEvaluateBtn.disabled = liveCapturing || !hasText || liveEvaluateUiLock;
   liveEvaluateBtn.classList.toggle("tlx-hidden", liveCapturing);
+  if (liveEvaluateUiLock) {
+    liveEvaluateBtn.textContent = "Evaluating...";
+  } else {
+    liveEvaluateBtn.textContent = "Evaluate";
+  }
 }
 
 async function initPopup() {
@@ -146,6 +165,10 @@ async function initPopup() {
   if (liveStopBtn) liveStopBtn.addEventListener("click", onLiveStop);
   if (liveEvaluateBtn) liveEvaluateBtn.addEventListener("click", onLiveEvaluate);
   if (liveEssayToggleBtn) liveEssayToggleBtn.addEventListener("click", onLiveEssayToggle);
+  if (liveLogPanel) {
+    liveLogPanel.addEventListener("click", (e) => { e.preventDefault(); toggleLiveLogExpanded(); });
+    liveLogPanel.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleLiveLogExpanded(); } });
+  }
   if (liveTranscriptText) liveTranscriptText.addEventListener("input", onLiveTranscriptEdited);
   autoDetectCaptureBtn.addEventListener("click", onAutoDetectCapture);
   startImageCaptureBtn.addEventListener("click", onStartImageCapture);
@@ -174,6 +197,8 @@ async function initPopup() {
         liveTranscriptText.textContent = "[Waiting for audio] " + hint;
         liveTranscriptText.scrollTop = 0;
       }
+    } else if (message.type === "LIVE_EVALUATE_LOG_LINE") {
+      appendLiveEvaluateLogLine(message.payload?.line);
     } else if (message.type === "IMAGE_ANALYSIS_COMPLETE") {
       renderImageAnalysisResult(message.payload);
     } else if (message.type === "IMAGE_ANALYSIS_ERROR") {
@@ -230,6 +255,88 @@ async function initPopup() {
   } catch {
     // ignore; live capture not available for this tab
   }
+
+  // If evaluation is in progress (e.g. panel was closed while evaluating), show "Evaluating..." and poll for result
+  try {
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEY_LIVE_EVALUATING,
+      STORAGE_KEY_LIVE_EVALUATE_RESULT,
+      STORAGE_KEY_EVALUATE_STARTED_AT
+    ]);
+    let isEvaluating = Boolean(stored[STORAGE_KEY_LIVE_EVALUATING]);
+    const startedAt = Number(stored[STORAGE_KEY_EVALUATE_STARTED_AT]) || 0;
+    const age = startedAt ? Date.now() - startedAt : 0;
+    // Stale: job was "started" long ago; worker was likely suspended, clear and don't show Evaluating
+    if (isEvaluating && age > LIVE_EVALUATE_STALE_MS) {
+      await chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATING]: false });
+      liveEvaluateUiLock = false;
+      isEvaluating = false;
+    }
+    if (isEvaluating && liveEvaluateBtn) {
+      liveEvaluateUiLock = true;
+      liveEvaluateBtn.disabled = true;
+      liveEvaluateBtn.textContent = "Evaluating...";
+      setLiveTranscriptStatus("Evaluation in progress…");
+      showLiveLogPanel("Evaluating...", "", "", false);
+      startLiveEvaluatePolling();
+      return;
+    }
+    const savedResult = stored[STORAGE_KEY_LIVE_EVALUATE_RESULT];
+    if (savedResult && liveEssayContainer && liveEssayContent) {
+      renderLiveEssay(savedResult);
+      updateLiveLogPanelFromResult(savedResult);
+    }
+    // So after collapse/reload: button reflects enabled (if has transcript and not capturing) and label "Evaluate"
+    syncLiveEvaluateAvailability();
+  } catch (_) {}
+}
+
+function stopLiveEvaluatePolling() {
+  if (liveEvaluatePollId) {
+    clearInterval(liveEvaluatePollId);
+    liveEvaluatePollId = null;
+  }
+}
+
+function startLiveEvaluatePolling() {
+  stopLiveEvaluatePolling();
+  liveEvaluatePollStartedAt = Date.now();
+  liveEvaluatePollId = setInterval(async () => {
+    try {
+      const elapsed = Date.now() - liveEvaluatePollStartedAt;
+      if (elapsed >= LIVE_EVALUATE_POLL_TIMEOUT_MS) {
+        stopLiveEvaluatePolling();
+        liveEvaluateUiLock = false;
+        chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATING]: false }).catch(() => {});
+        if (liveEvaluateBtn) {
+          liveEvaluateBtn.textContent = "Evaluate";
+          syncLiveEvaluateAvailability();
+        }
+        showLiveLogPanel("Evaluation was interrupted (panel was closed). Click Evaluate to try again.", "", "", false);
+        setLiveTranscriptStatus("Evaluation was interrupted (panel was closed). Click Evaluate to try again.", true);
+        return;
+      }
+      const stored = await chrome.storage.local.get([STORAGE_KEY_LIVE_EVALUATING, STORAGE_KEY_LIVE_EVALUATE_RESULT]);
+      if (!stored[STORAGE_KEY_LIVE_EVALUATING]) {
+        stopLiveEvaluatePolling();
+        liveEvaluateUiLock = false;
+        if (liveEvaluateBtn) {
+          liveEvaluateBtn.textContent = "Evaluate";
+          syncLiveEvaluateAvailability();
+        }
+        const result = stored[STORAGE_KEY_LIVE_EVALUATE_RESULT];
+        if (result && liveEssayContainer && liveEssayContent) {
+          renderLiveEssay(result);
+          updateLiveLogPanelFromResult(result);
+        }
+        setLiveTranscriptStatus("");
+      }
+    } catch (_) {
+      stopLiveEvaluatePolling();
+      liveEvaluateUiLock = false;
+      syncLiveEvaluateAvailability();
+    }
+  }, LIVE_EVALUATE_POLL_MS);
 }
 
 async function onAnalyzeSelection() {
@@ -802,6 +909,61 @@ function setLiveTranscriptStatus(message, isError = false) {
   liveTranscriptStatus.style.color = isError ? "#b91c1c" : "";
 }
 
+function showLiveLogPanel(leftText, rightText, logText, expanded) {
+  if (!liveLogPanel || !liveLogHeaderLeft || !liveLogHeaderRight || !liveLogContent) return;
+  liveLogPanel.classList.remove("tlx-hidden");
+  liveLogHeaderLeft.textContent = leftText || "";
+  liveLogHeaderRight.textContent = rightText || "";
+  liveLogContent.textContent = logText || "";
+  liveLogExpanded = Boolean(expanded);
+  liveLogContent.classList.toggle("tlx-hidden", !liveLogExpanded);
+  liveLogPanel.setAttribute("aria-expanded", liveLogExpanded);
+}
+
+function hideLiveLogPanel() {
+  if (liveLogPanel) liveLogPanel.classList.add("tlx-hidden");
+  liveLogExpanded = false;
+}
+
+function updateLiveLogPanelFromResult(data) {
+  if (!data || typeof data !== "object") return;
+  const roberta = data.roberta || {};
+  const label = roberta.label || {};
+  const className = String(label.class_name || label.label || "").trim();
+  const conf = Number(roberta.confidence);
+  const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
+  const src = roberta.inference_source ? ` ${roberta.inference_source}` : "";
+  const right = className ? `${className} (${confPct})${src}` : "";
+  const logText = typeof data.backend_log === "string" ? data.backend_log : "";
+  showLiveLogPanel("Evaluation complete", right, logText, false);
+}
+
+function toggleLiveLogExpanded() {
+  if (!liveLogPanel || !liveLogContent) return;
+  liveLogExpanded = !liveLogExpanded;
+  liveLogContent.classList.toggle("tlx-hidden", !liveLogExpanded);
+  liveLogPanel.setAttribute("aria-expanded", liveLogExpanded);
+}
+
+function appendLiveEvaluateLogLine(line) {
+  if (!liveLogContent || line == null) return;
+  const text = String(line).trim();
+  if (!text) return;
+  console.log("[TruthLens]", text);
+  const hadContent = liveLogContent.textContent.length > 0;
+  if (hadContent) {
+    liveLogContent.textContent += "\n" + text;
+  } else {
+    liveLogContent.textContent = text;
+  }
+  liveLogContent.scrollTop = liveLogContent.scrollHeight;
+  if (!hadContent && liveLogPanel && !liveLogExpanded) {
+    liveLogExpanded = true;
+    liveLogContent.classList.remove("tlx-hidden");
+    liveLogPanel.setAttribute("aria-expanded", "true");
+  }
+}
+
 async function onLiveStartPause() {
   const tab = await getActiveTab();
   if (!tab?.id) {
@@ -896,6 +1058,13 @@ async function onLiveStop() {
   setLiveTranscriptStatus("Cleared.");
 }
 
+function clearLiveEvaluateResult() {
+  if (liveEssayContainer) liveEssayContainer.classList.add("tlx-hidden");
+  if (liveEssayContent) liveEssayContent.innerHTML = "";
+  hideLiveLogPanel();
+  chrome.storage.local.remove(STORAGE_KEY_LIVE_EVALUATE_RESULT).catch(() => {});
+}
+
 async function onLiveEvaluate() {
   if (!liveEvaluateBtn || !liveTranscriptText) return;
   const text = String(liveTranscriptText.textContent || "").trim();
@@ -909,10 +1078,15 @@ async function onLiveEvaluate() {
     return;
   }
 
+  // Remove previous result and stored result; show new one when it arrives
+  clearLiveEvaluateResult();
+
+  liveEvaluateUiLock = true;
   const prevLabel = liveEvaluateBtn.textContent;
   liveEvaluateBtn.disabled = true;
   liveEvaluateBtn.textContent = "Evaluating...";
   setLiveTranscriptStatus("Evaluating transcript…");
+  showLiveLogPanel("Evaluating...", "", "", false);
 
   try {
     const resp = await chrome.runtime.sendMessage({ type: "EVALUATE_TRANSCRIPT", payload: { text } });
@@ -922,19 +1096,16 @@ async function onLiveEvaluate() {
 
     const data = resp.result || {};
     renderLiveEssay(data);
-    const roberta = data?.roberta || {};
-    const label = roberta?.label || {};
-    const className = label?.class_name || label?.label || "";
-    const conf = Number(roberta?.confidence);
-    const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
-    const src = roberta?.inference_source ? ` • ${roberta.inference_source}` : "";
-
-    const summary = className ? `✅ ${className}${confPct ? ` (${confPct})` : ""}${src}` : "✅ Evaluation complete.";
-    setLiveTranscriptStatus(summary);
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEY_LIVE_EVALUATE_RESULT]: data });
+    } catch (_) {}
+    updateLiveLogPanelFromResult(data);
+    setLiveTranscriptStatus("");
     console.log("[TruthLens] /api/process result:", data);
   } catch (error) {
     setLiveTranscriptStatus(`Evaluate error: ${error.message || "Unknown error"}`, true);
   } finally {
+    liveEvaluateUiLock = false;
     liveEvaluateBtn.textContent = prevLabel;
     syncLiveEvaluateAvailability();
   }
