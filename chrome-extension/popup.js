@@ -53,6 +53,7 @@ const LIVE_MAX_CHARS = 500;
 const STORAGE_KEY_LIVE_EVALUATE_RESULT = "truthlens_live_evaluate_result";
 const STORAGE_KEY_LIVE_EVALUATING = "truthlens_live_evaluating";
 const STORAGE_KEY_EVALUATE_STARTED_AT = "truthlens_live_evaluate_started_at";
+const STORAGE_KEY_OVERLAYS_BY_TAB = "truthlens_overlays_by_tab";
 const LIVE_EVALUATE_POLL_MS = 800;
 const LIVE_EVALUATE_POLL_TIMEOUT_MS = 45000; // 45 s: if still "evaluating", assume worker was suspended
 const LIVE_EVALUATE_STALE_MS = 90000; // 90 s: if "evaluating" started this long ago, treat as stale on open
@@ -215,8 +216,10 @@ async function initPopup() {
     return;
   }
 
+  const stored = await getStoredOverlaysForTab(tab.id);
   const status = await sendToContentScript(tab, { type: "GET_OVERLAY_STATUS" }, { injectIfNeeded: true }).catch(() => null);
-  overlaysEnabled = Boolean(status?.enabled);
+  overlaysEnabled = status != null ? Boolean(status.enabled) : Boolean(stored);
+  await setStoredOverlaysForTab(tab.id, overlaysEnabled);
   syncOverlayButtonText();
 
   // Sync live transcript button with actual capture state on the content side
@@ -248,7 +251,7 @@ async function initPopup() {
         liveTranscriptText.classList.remove("tlx-hidden");
       } else {
         liveTranscriptText.textContent = "";
-        liveTranscriptText.classList.add("tlx-hidden");
+        liveTranscriptText.classList.remove("tlx-hidden");
       }
     }
     liveLastRenderedWordKey = getLastWordKeyFromText(existingText);
@@ -417,6 +420,7 @@ async function onAnalyzePage() {
       throw new Error(response?.error || "Failed to analyze page.");
     }
     overlaysEnabled = true;
+    await setStoredOverlaysForTab(tab.id, true);
     syncOverlayButtonText();
     pageStatus.textContent = `Analyzed ${response.summary?.analyzed || 0} text blocks on this page.`;
   } catch (error) {
@@ -437,6 +441,7 @@ async function onToggleOverlays() {
     if (overlaysEnabled) {
       await sendToContentScript(tab, { type: "CLEAR_OVERLAYS" }, { injectIfNeeded: true });
       overlaysEnabled = false;
+      await setStoredOverlaysForTab(tab.id, false);
       pageStatus.textContent = "Overlays removed.";
     } else {
       await onAnalyzePage();
@@ -701,6 +706,20 @@ function setBusy(button, busy, busyText) {
 
 function syncOverlayButtonText() {
   toggleOverlayBtn.textContent = overlaysEnabled ? "Remove Overlays" : "Show Overlays";
+}
+
+async function getStoredOverlaysForTab(tabId) {
+  const key = STORAGE_KEY_OVERLAYS_BY_TAB;
+  const raw = await chrome.storage.local.get(key).then((o) => o[key]);
+  if (raw == null || typeof raw !== "object") return false;
+  return Boolean(raw[String(tabId)]);
+}
+
+async function setStoredOverlaysForTab(tabId, enabled) {
+  const key = STORAGE_KEY_OVERLAYS_BY_TAB;
+  const prev = await chrome.storage.local.get(key).then((o) => o[key] || {});
+  prev[String(tabId)] = enabled;
+  await chrome.storage.local.set({ [key]: prev });
 }
 
 async function getActiveTab() {

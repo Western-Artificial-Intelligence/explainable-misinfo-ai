@@ -90,6 +90,12 @@
   word-break: break-word;
 }
 
+.tlx-panel-live .tlx-live-transcript-text:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  font-style: italic;
+}
+
 .tlx-live-essay {
   margin-top: 8px;
   padding-top: 6px;
@@ -528,6 +534,45 @@
 
 .tlx-inline-badge:hover .tlx-tooltip {
   display: block;
+}
+
+/* Body1 / body2 / conclusion hover panel (Analyze This Page); only when hovering the label */
+.tlx-badge-detail {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  max-width: 90vw;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 1);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  z-index: 2147483001;
+}
+
+.tlx-badge-detail-p {
+  margin: 0 0 8px;
+}
+
+.tlx-badge-detail-p:last-child {
+  margin-bottom: 0;
+}
+
+.tlx-inline-badge:hover .tlx-badge-detail {
+  display: block;
+}
+
+/* When body detail exists, show only it on hover (not the short tooltip) */
+.tlx-inline-badge:has(.tlx-badge-detail):hover .tlx-tooltip {
+  display: none;
 }
 
 .tlx-btn-secondary {

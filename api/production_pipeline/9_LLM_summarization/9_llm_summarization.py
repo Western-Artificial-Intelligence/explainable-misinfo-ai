@@ -521,36 +521,31 @@ async def process_step8_output(step8_out: Dict[str, Any]) -> Dict[str, Any]:
             break
         attempt += 1
 
-    # 7) Fallback if invalid
+    # 7) Fallback if invalid or LLM unavailable
     fallback_intro = (
         f'The claim "{user_claim}" is predicted to be {verdict} with {top_pct}% confidence '
         f"(True {p_true_pct}% · Mixed {p_mixed_pct}% · False {p_false_pct}%)."
     )
-    fallback_body = "Evidence limited; review sources."
+    fallback_conclusion = (
+        "Classification is based on the model and retrieved evidence. "
+        "Check the citations for source details."
+    )
     if llm_obj is None:
         llm_obj = {
             "intro": fallback_intro,
-            "body1": fallback_body,
-            "body2": "—",
-            "conclusion": "See citations for details.",
+            "body1": "",
+            "body2": "",
+            "conclusion": fallback_conclusion,
         }
 
     # 8) Essay fields (ensure non-empty strings)
     def _str(s: str) -> str:
-        return (s or "").strip() or "—"
+        return (s or "").strip() or ""
 
-    intro = _str(llm_obj.get("intro"))
+    intro = _str(llm_obj.get("intro")) or fallback_intro
     body1 = _str(llm_obj.get("body1"))
     body2 = _str(llm_obj.get("body2"))
-    conclusion = _str(llm_obj.get("conclusion"))
-    if not intro:
-        intro = fallback_intro
-    if not body1:
-        body1 = fallback_body
-    if not body2:
-        body2 = "—"
-    if not conclusion:
-        conclusion = "See citations for details."
+    conclusion = _str(llm_obj.get("conclusion")) or fallback_conclusion
 
     # 9) Summary block: essay-style intro, body1, body2, conclusion
     summary = {

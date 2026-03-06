@@ -31,7 +31,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
-    const prediction = await callAnalyze(selectedText);
+    const raw = await callProcess(selectedText);
+    const prediction = normalizeProcessResponse(raw);
     await safeSendToTab(tab, {
       type: "SHOW_SELECTION_RESULT",
       payload: prediction
@@ -180,7 +181,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "ANALYZE_TEXT") {
     (async () => {
       try {
-        const result = await callAnalyze(message.text || "");
+        const raw = await callProcess(message.text || "");
+        const result = normalizeProcessResponse(raw);
         sendResponse({ ok: true, result });
       } catch (error) {
         sendResponse({ ok: false, error: error.message });
@@ -193,20 +195,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const items = Array.isArray(message.items) ? message.items : [];
-        const results = await analyzeBatch(items);
-        sendResponse({ ok: true, results });
+        const tabId = sender.tab?.id;
+        const results = await analyzeBatch(items, tabId);
+        try {
+          sendResponse({ ok: true, results });
+        } catch (_) {
+          /* Channel may be closed if popup/tab closed; ignore */
+        }
       } catch (error) {
-        sendResponse({ ok: false, error: error.message });
+        try {
+          sendResponse({ ok: false, error: error.message });
+        } catch (_) {}
       }
     })();
     return true;
   }
 });
 
-async function analyzeBatch(items) {
+async function analyzeBatch(items, tabId) {
   const output = [];
   const concurrency = 4;
   let cursor = 0;
+
+  function pushItemResult(payload) {
+    if (tabId) {
+      try {
+        chrome.tabs.sendMessage(tabId, { type: "ANALYZE_PAGE_ITEM_RESULT", payload });
+      } catch (_) {}
+    }
+  }
 
   async function worker() {
     while (cursor < items.length) {
@@ -216,27 +233,22 @@ async function analyzeBatch(items) {
       const text = String(item?.text || "").trim();
 
       if (!id || !text) {
-        output[index] = {
-          id,
-          ok: false,
-          error: "Invalid analysis item."
-        };
+        const entry = { id, ok: false, error: "Invalid analysis item." };
+        output[index] = entry;
+        pushItemResult(entry);
         continue;
       }
 
       try {
-        const result = await callPredict(text);
-        output[index] = {
-          id,
-          ok: true,
-          result
-        };
+        const raw = await callProcess(text);
+        const result = normalizeProcessResponse(raw);
+        const entry = { id, ok: true, result };
+        output[index] = entry;
+        pushItemResult(entry);
       } catch (error) {
-        output[index] = {
-          id,
-          ok: false,
-          error: error.message
-        };
+        const entry = { id, ok: false, error: error.message };
+        output[index] = entry;
+        pushItemResult(entry);
       }
     }
   }
@@ -320,6 +332,45 @@ async function callProcess(userClaim) {
   }
 
   return await response.json();
+}
+
+/** Map /api/process response to UI shape: { prediction, confidence, explanation, sources }. */
+function normalizeProcessResponse(data) {
+  const roberta = data?.roberta || {};
+  const label = roberta?.label || {};
+  const className = String(label?.class_name || "mixed").toLowerCase();
+  const rawPrediction =
+    className === "true" ? "REAL"
+    : className === "false" ? "FAKE"
+    : "MIXED";
+  const prediction = rawPrediction;
+
+  let confidence = Number(roberta?.confidence);
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    confidence = 0;
+  }
+
+  const summary = data?.summary || {};
+  const explanation =
+    (summary.conclusion || summary.intro || "").trim()
+    || (data?.backend_log ? (data.backend_log.slice(0, 500) + (data.backend_log.length > 500 ? "…" : "")) : "")
+    || "Processed via full pipeline.";
+
+  const citations = summary.citations || [];
+  const sources = Array.isArray(citations)
+    ? citations.map((c) => ({
+        title: c?.title || c?.source || "",
+        url: c?.url || "",
+        snippet: c?.snippet || ""
+      }))
+    : [];
+
+  const intro = (summary.intro || "").trim();
+  const body1 = (summary.body1 || "").trim();
+  const body2 = (summary.body2 || "").trim();
+  const conclusion = (summary.conclusion || "").trim();
+
+  return { prediction, confidence, explanation, sources, intro, body1, body2, conclusion };
 }
 
 const STREAM_NO_RESULT_MSG = "Stream ended without result.";
