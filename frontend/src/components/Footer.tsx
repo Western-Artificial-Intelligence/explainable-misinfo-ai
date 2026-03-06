@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "react-router-dom";
 import { Shield, Github, Puzzle, ExternalLink } from "lucide-react";
 
 export function Footer() {

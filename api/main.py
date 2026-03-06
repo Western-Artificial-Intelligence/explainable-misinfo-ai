@@ -2,27 +2,22 @@
 import os  # noqa: F401
 from pathlib import Path
 import logging
-import warnings
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
-<<<<<<< HEAD
-=======
 
-# Suppress pydub's ffmpeg-not-found warning at import; audio routes need ffmpeg on PATH at runtime.
-warnings.filterwarnings(
-    "ignore",
-    message="Couldn't find ffmpeg or avconv",
-    category=RuntimeWarning,
-)
->>>>>>> d81aab986e3f7a5961451383b4d6b1e318df64fe
+# Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.is_file():
+    load_dotenv(_env_path, override=False)
+else:
+    load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import classify, documents, health, history
-from .utils.history_store import get_store_mode
-
-load_dotenv()
-logger = logging.getLogger(__name__)
+from .routes import classify, documents, health, production
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
@@ -41,13 +36,6 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(classify.router)
 app.include_router(documents.router)
-app.include_router(history.router)
-
-
-@app.on_event("startup")
-def startup_checks() -> None:
-    mode = get_store_mode()
-    logger.info("History storage mode: %s", mode)
 
 # Audio extraction and voice-to-text route
 try:
@@ -56,11 +44,9 @@ try:
 except (ModuleNotFoundError, ImportError) as exc:
     logger.warning(
         "Skipping /api/audio routes because dependency is missing: %s. "
-        "Install optional audio deps to enable it. Using fallback.",
+        "Install optional audio deps to enable it.",
         getattr(exc, "name", exc),
     )
-    from .routes import audio_fallback
-    app.include_router(audio_fallback.router)
 
 # Image processing and OCR route
 try:
