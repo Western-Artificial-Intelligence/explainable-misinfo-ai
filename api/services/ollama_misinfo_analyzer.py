@@ -34,11 +34,11 @@ def _search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
 
 
 _SYSTEM_PROMPT = """You are a misinformation analyst. Your job is to:
-1. Classify the given claim or text as either REAL (factual, verifiable) or FAKE (misinformation, false, misleading).
-2. Provide a clear, concise explanation with reasoning.
+1. Classify the given claim or text as TRUE (factual, verifiable), MIXED (partially true or unverifiable), or FALSE (misinformation, false, misleading).
+2. Provide a short, clear explanation with reasoning.
 3. If internet article snippets are provided below, reference them in your reasoning to support your classification. Cite specific findings from the snippets when relevant.
 4. Respond in this exact JSON format only, no other text:
-{"prediction":"REAL" or "FAKE","confidence":0.0 to 1.0,"explanation":"Your detailed reasoning here, referencing articles when available."}
+{"prediction":"TRUE" or "MIXED" or "FALSE","confidence":0.0 to 1.0,"explanation":"Your short reasoning here, referencing articles when available."}
 """
 
 
@@ -104,19 +104,37 @@ async def analyze_with_ollama(
                 json_str = content[start:end]
 
         data = json.loads(json_str)
-        prediction = str(data.get("prediction", "REAL")).strip().upper()
-        if prediction not in ("REAL", "FAKE"):
-            prediction = "FAKE" if "fake" in prediction.lower() or "misinformation" in prediction.lower() else "REAL"
+        raw = str(data.get("prediction", "MIXED")).strip().upper()
+        valid = ("TRUE", "MIXED", "FALSE")
+        if raw in valid:
+            prediction = raw
+        elif raw == "REAL":
+            prediction = "TRUE"
+        elif raw == "FAKE":
+            prediction = "FALSE"
+        elif "false" in raw.lower() or "fake" in raw.lower() or "misinformation" in raw.lower():
+            prediction = "FALSE"
+        elif "true" in raw.lower() or "real" in raw.lower() or "factual" in raw.lower():
+            prediction = "TRUE"
+        else:
+            prediction = "MIXED"
         confidence = float(data.get("confidence", 0.7))
         confidence = max(0.0, min(1.0, confidence))
         explanation = str(data.get("explanation", "No explanation provided.")).strip()
         if not explanation:
             explanation = f"Classified as {prediction} based on analysis."
 
+        sources = [
+            {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": (r.get("snippet", "") or r.get("body", ""))[:150]}
+            for r in search_snippets
+            if r.get("href")
+        ]
+
         return {
             "prediction": prediction,
             "confidence": confidence,
             "explanation": explanation,
+            "sources": sources,
         }
     except OllamaBlackboxError as e:
         logger.warning("Ollama unavailable for analyze: %s", e.message)
