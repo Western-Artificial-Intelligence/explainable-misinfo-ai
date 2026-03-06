@@ -306,3 +306,78 @@ Frontend notes:
 3. Include a button that links to our chrome extension
 4. UI changes for the button on the chrome extension
 5. Change the favicon for the chrome extension
+
+---
+
+## Full Stack Run (Backend + Frontend + Extension + MongoDB)
+
+### 1. Environment setup
+
+Create `.env.local` in the repo root (or copy from `.env.example`) and set:
+
+```bash
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2
+OLLAMA_TIMEOUT_S=60
+
+MONGO_URI=mongodb+srv://khimaniaryan_db_user:<db_password>@waicluster0.eeyuita.mongodb.net/?appName=WAICluster0
+MONGODB_DB_NAME=truthlens
+MONGODB_HISTORY_COLLECTION=history
+MONGODB_CONNECT_TIMEOUT_MS=5000
+```
+
+If `MONGO_URI` is missing/unreachable, backend history automatically falls back to in-memory.
+
+### 2. Run backend
+
+```bash
+cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn api.main:app --reload
+```
+
+Backend URLs:
+- `http://127.0.0.1:8000/healthz`
+- `http://127.0.0.1:8000/docs`
+
+### 3. Run frontend
+
+```bash
+cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai/frontend
+npm install
+npm run dev
+```
+
+Frontend default:
+- `http://localhost:3000`
+
+The frontend now calls:
+- `POST /predict` (RoBERTa mode)
+- `POST /analyze` (LLM encoder mode)
+- `GET/POST/DELETE /history` (history persistence)
+
+### 4. Load Chrome extension
+
+1. Open `chrome://extensions`
+2. Enable `Developer mode`
+3. Click `Load unpacked`
+4. Select:
+   - `/Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai/chrome-extension`
+
+Default backend for extension is `http://localhost:8000`.
+
+Backedn
+cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# set real password in MONGO_URI
+uvicorn api.main:app --reload
+
+Frontend
+cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai/frontend
+npm install
+npm run dev
+
+
