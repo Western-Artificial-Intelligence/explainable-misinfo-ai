@@ -70,6 +70,142 @@
   margin-bottom: 12px;
 }
 
+.tlx-panel-empty {
+  min-height: 80px;
+}
+
+.tlx-panel-live .tlx-live-transcript-text {
+  min-height: 60px;
+  max-height: 20vh;
+  overflow-y: auto;
+  padding: 10px;
+  margin: 6px 0 4px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tlx-panel-live .tlx-live-transcript-text:empty::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.tlx-live-essay {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.tlx-live-essay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tlx-live-essay-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tlx-live-essay-body {
+  max-height: 40vh;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1f2933;
+  padding-right: 2px;
+}
+
+/* Live evaluation log panel (collapsed: one line; expanded: full log) */
+.tlx-live-log-panel {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tlx-live-log-panel:hover {
+  background: #f1f5f9;
+}
+
+.tlx-live-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tlx-live-log-left {
+  color: #334155;
+  font-weight: 500;
+}
+
+.tlx-live-log-right {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tlx-live-log-content {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 28vh;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.4;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tlx-live-essay-section {
+  margin-bottom: 8px;
+}
+
+.tlx-live-essay-section h3 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.tlx-live-essay-section p {
+  margin: 0;
+}
+
+.tlx-panel-live .tlx-live-transcript-partial {
+  min-height: 2em;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  margin: 4px 0 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #64748b;
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tlx-section h2 {
   margin: 0 0 6px;
   font-size: 14px;
@@ -398,6 +534,45 @@
 
 .tlx-inline-badge:hover .tlx-tooltip {
   display: block;
+}
+
+/* Body1 / body2 / conclusion hover panel (Analyze This Page); only when hovering the label */
+.tlx-badge-detail {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 280px;
+  max-width: 90vw;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 1);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  z-index: 2147483001;
+}
+
+.tlx-badge-detail-p {
+  margin: 0 0 8px;
+}
+
+.tlx-badge-detail-p:last-child {
+  margin-bottom: 0;
+}
+
+.tlx-inline-badge:hover .tlx-badge-detail {
+  display: block;
+}
+
+/* When body detail exists, show only it on hover (not the short tooltip) */
+.tlx-inline-badge:has(.tlx-badge-detail):hover .tlx-tooltip {
+  display: none;
 }
 
 .tlx-btn-secondary {

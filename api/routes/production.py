@@ -1,17 +1,63 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
+import queue
 import sys
+import threading
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from ..production_pipeline.middlewares.llm_blackbox import LLMBlackbox
 
 router = APIRouter()
+
+
+class _LineBufferedStdout:
+    """Thread-safe stdout proxy: print each line to server console first, then enqueue for SSE to frontend."""
+
+    def __init__(self, log_queue: queue.Queue, original_stdout: io.TextIOBase):
+        self._queue = log_queue
+        self._original = original_stdout
+        self._buffer: list[str] = []
+        self._lock = threading.Lock()
+
+    def _emit_line(self, line: str) -> None:
+        if not line:
+            return
+        if self._original:
+            self._original.write(line + "\n")
+            self._original.flush()
+        self._queue.put(line)
+
+    def write(self, s: str) -> int:
+        with self._lock:
+            for c in s:
+                if c == "\n":
+                    line = "".join(self._buffer).strip()
+                    self._buffer.clear()
+                    self._emit_line(line)
+                else:
+                    self._buffer.append(c)
+        return len(s)
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._buffer:
+                line = "".join(self._buffer).strip()
+                self._buffer.clear()
+                self._emit_line(line)
+        if self._original:
+            self._original.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._original, name)
 
 
 # ----------------------------
@@ -154,37 +200,46 @@ async def process(request: Request):
             detail={"code": "BAD_REQUEST", "message": "user_claim must be a non-empty string"},
         )
 
+    log_buffer = io.StringIO()
     try:
-        # Steps 1–3: sync, cheap → run in threadpool for event-loop hygiene.
-        step1_out = await run_in_threadpool(process_user_claim, user_claim)
-        step2_out = await run_in_threadpool(process_step1_output, step1_out)
-        step3_out = await run_in_threadpool(process_step2_output, step2_out)
+        with redirect_stdout(log_buffer):
+            # Steps 1–3: sync, cheap → run in threadpool for event-loop hygiene.
+            step1_out = await run_in_threadpool(process_user_claim, user_claim)
+            step2_out = await run_in_threadpool(process_step1_output, step1_out)
+            step3_out = await run_in_threadpool(process_step2_output, step2_out)
 
-        # Step 4: async (LLM query expansion)
-        step4_out = await process_step3_output(step3_out)
+            # Step 4: async (LLM query expansion)
+            step4_out = await process_step3_output(step3_out)
 
-        # Steps 5–8: async (HTTP + CPU-bound but already handled with async APIs)
-        step5_out = await process_step4_output(step4_out)
-        step6_out = await process_step5_output(step5_out)
-        step7_out = await process_step6_output(step6_out)
-        step8_out = await process_step7_output(step7_out)
+            # Steps 5–8: async (HTTP + CPU-bound but already handled with async APIs)
+            step5_out = await process_step4_output(step4_out)
+            step6_out = await process_step5_output(step5_out)
+            step7_out = await process_step6_output(step6_out)
+            step8_out = await process_step7_output(step7_out)
 
-        if _STEP9_AVAILABLE and process_step8_output is not None:
-            try:
-                step9_out = await process_step8_output(step8_out)
-                return step9_out
-            except Exception as e:
-                if hasattr(e, "code"):
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "code": getattr(e, "code", "SUMMARY_ERROR"),
-                            "message": getattr(e, "message", str(e)),
-                            "details": getattr(e, "details", None),
-                        },
-                    )
-                raise HTTPException(status_code=500, detail=str(e))
-        return step8_out
+            if _STEP9_AVAILABLE and process_step8_output is not None:
+                try:
+                    step9_out = await process_step8_output(step8_out)
+                    out = step9_out
+                except Exception as e:
+                    if hasattr(e, "code"):
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "code": getattr(e, "code", "SUMMARY_ERROR"),
+                                "message": getattr(e, "message", str(e)),
+                                "details": getattr(e, "details", None),
+                            },
+                        )
+                    raise HTTPException(status_code=500, detail=str(e))
+            else:
+                out = step8_out
+
+        backend_log = (log_buffer.getvalue() or "").strip()
+        if isinstance(out, dict):
+            out = dict(out)
+            out["backend_log"] = backend_log
+        return out
 
     except IngestClaimError as e:
         raise HTTPException(status_code=400, detail={"code": getattr(e, "code", "INGEST_ERROR"), "message": getattr(e, "message", str(e))})
@@ -212,6 +267,110 @@ async def process(request: Request):
 
     except LLMSummarizationError as e:
         raise HTTPException(status_code=400, detail={"code": getattr(e, "code", "SUMMARY_ERROR"), "message": getattr(e, "message", str(e)), "details": getattr(e, "details", None)})
+
+
+async def _run_pipeline_async(user_claim: str):
+    """Run the same pipeline as process(); used by streaming endpoint. Raises on error."""
+    step1_out = await run_in_threadpool(process_user_claim, user_claim)
+    step2_out = await run_in_threadpool(process_step1_output, step1_out)
+    step3_out = await run_in_threadpool(process_step2_output, step2_out)
+    step4_out = await process_step3_output(step3_out)
+    step5_out = await process_step4_output(step4_out)
+    step6_out = await process_step5_output(step5_out)
+    step7_out = await process_step6_output(step6_out)
+    step8_out = await process_step7_output(step7_out)
+    if _STEP9_AVAILABLE and process_step8_output is not None:
+        step9_out = await process_step8_output(step8_out)
+        return step9_out
+    return step8_out
+
+
+def _run_pipeline_in_thread(
+    user_claim: str,
+    log_queue: queue.Queue,
+    proxy: _LineBufferedStdout,
+    result_holder: list,
+    exc_holder: list,
+) -> None:
+    """Run the pipeline in a dedicated thread so the async generator can drain
+    the log queue in real time without being blocked by the pipeline."""
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        with redirect_stdout(proxy):
+            result_holder.append(loop.run_until_complete(_run_pipeline_async(user_claim)))
+    except Exception as e:
+        exc_holder.append(e)
+    finally:
+        loop.close()
+
+
+async def _stream_process_generator(user_claim: str):
+    import asyncio
+
+    log_queue: queue.Queue = queue.Queue()
+    proxy = _LineBufferedStdout(log_queue, getattr(sys, "stdout", None))
+    collected: list[str] = []
+    result_holder: list = []
+    exc_holder: list = []
+
+    thread = threading.Thread(
+        target=_run_pipeline_in_thread,
+        args=(user_claim, log_queue, proxy, result_holder, exc_holder),
+        daemon=True,
+    )
+    thread.start()
+
+    # Drain log queue in real time and yield each line so the client updates live
+    loop = asyncio.get_event_loop()
+    while thread.is_alive() or not log_queue.empty():
+        try:
+            line = await loop.run_in_executor(
+                None, lambda: log_queue.get(timeout=0.15)
+            )
+            collected.append(line)
+            yield f"data: {json.dumps({'log': line})}\n\n"
+        except queue.Empty:
+            await asyncio.sleep(0.05)
+
+    # Drain any remaining lines
+    while True:
+        try:
+            line = log_queue.get_nowait()
+            collected.append(line)
+            yield f"data: {json.dumps({'log': line})}\n\n"
+        except queue.Empty:
+            break
+
+    if exc_holder:
+        yield f"event: error\ndata: {json.dumps({'error': str(exc_holder[0])})}\n\n"
+        return
+
+    result = result_holder[0] if result_holder else None
+    backend_log = "\n".join(collected)
+    if isinstance(result, dict):
+        result = dict(result)
+        result["backend_log"] = backend_log
+    yield f"event: result\ndata: {json.dumps(result)}\n\n"
+
+
+@router.post("/process-stream")
+async def process_stream(request: Request):
+    """Stream backend log lines as SSE, then send final result. For real-time log in the extension."""
+    body = await request.json()
+    user_claim = body.get("user_claim")
+    if not isinstance(user_claim, str) or not user_claim.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "BAD_REQUEST", "message": "user_claim must be a non-empty string"},
+        )
+    return StreamingResponse(
+        _stream_process_generator(user_claim.strip()),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class LLMTestRequest(BaseModel):
