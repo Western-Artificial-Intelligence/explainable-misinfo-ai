@@ -40,14 +40,14 @@ app = FastAPI(title="TruthLens API", version="0.1.0")
 
 # Enable CORS:
 # CORS (Cross-Origin Resource Sharing) allows frontend hosted on a different domain
-# to make API requests to this backend without being blocked by the browser
+# to make API requests to this backend without being blocked by the browser.
+# Use explicit middleware so headers are present even on errors and preflight.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*"
-    ],  # "*" = allow requests from any origin. Can restrict later for security.
-    allow_methods=["*"],  # Allow all HTTP methods: GET, POST, PUT, DELETE...
-    allow_headers=["*"],  # Allow all HTTP headers (like content-type, authorization)
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 app.include_router(health.router)
 app.include_router(classify.router)

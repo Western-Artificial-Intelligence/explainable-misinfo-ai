@@ -60,6 +60,8 @@ Host your FastAPI backend so the frontend at Netlify can call `https://api.truth
 
 6. **Custom domain** – Settings → Custom Domains → Add `api.truthlens.app`.
 
+7. **Avoid CORS errors from cold start** – Render free tier spins down after ~15 min. When asleep, the first request gets a 503 from Render’s proxy (not your app), which has no CORS headers. Use [UptimeRobot](https://uptimerobot.com) (free) to ping `https://your-app.onrender.com/healthz` every 10 minutes to keep the service awake.
+
 ---
 
 ## Option 3: Fly.io
