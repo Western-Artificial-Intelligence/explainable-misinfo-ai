@@ -197,6 +197,20 @@
   margin: 0;
 }
 
+.tlx-live-essay-refs {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.tlx-live-essay-refs a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.tlx-live-essay-refs a:hover {
+  text-decoration: underline;
+}
+
 .tlx-panel-live .tlx-live-transcript-partial {
   min-height: 2em;
   max-height: 120px;

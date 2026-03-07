@@ -1000,8 +1000,7 @@ function updateLiveLogPanelFromResult(data) {
   const className = String(label.class_name || label.label || "").trim();
   const conf = Number(roberta.confidence);
   const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
-  const src = roberta.inference_source ? ` ${roberta.inference_source}` : "";
-  const right = className ? `${className} (${confPct})${src}` : "";
+  const right = className ? `${className} (${confPct})` : "";
   const logText = typeof data.backend_log === "string" ? data.backend_log : "";
   showLiveLogPanel("Evaluation complete", right, logText, false);
 }
@@ -1224,31 +1223,34 @@ function extractEssaySections(result) {
 function renderLiveEssay(result) {
   if (!liveEssayContainer || !liveEssayContent) return;
   const sections = extractEssaySections(result);
-  if (!sections) {
+  const hasSections = sections && (sections.body1 || sections.body2 || sections.conclusion);
+  const sources = Array.isArray(result?.sources) ? result.sources : [];
+  const refs = sources.slice(0, 2);
+  if (!hasSections && refs.length === 0) {
     liveEssayContainer.classList.add("tlx-hidden");
     liveEssayContent.innerHTML = "";
     return;
   }
 
   const parts = [];
-  if (sections.intro) {
-    parts.push(
-      `<div class="tlx-live-essay-section"><h3>Introduction</h3><p>${escapeHtml(sections.intro)}</p></div>`
-    );
-  }
-  if (sections.body1) {
+  if (sections?.body1) {
     parts.push(
       `<div class="tlx-live-essay-section"><h3>Body 1</h3><p>${escapeHtml(sections.body1)}</p></div>`
     );
   }
-  if (sections.body2) {
+  if (sections?.body2) {
     parts.push(
       `<div class="tlx-live-essay-section"><h3>Body 2</h3><p>${escapeHtml(sections.body2)}</p></div>`
     );
   }
-  if (sections.conclusion) {
+  if (sections?.conclusion) {
     parts.push(
       `<div class="tlx-live-essay-section"><h3>Conclusion</h3><p>${escapeHtml(sections.conclusion)}</p></div>`
+    );
+  }
+  if (refs.length > 0) {
+    parts.push(
+      `<div class="tlx-live-essay-section"><h3>References</h3><ul class="tlx-live-essay-refs">${refs.map((s) => `<li><a href="${escapeHtml(s.url || "#")}" target="_blank" rel="noopener">${escapeHtml(s.title || s.url || "Source")}</a></li>`).join("")}</ul></div>`
     );
   }
 
