@@ -1,0 +1,39 @@
+# Git and IDE
+.git
+.gitignore
+.vscode
+.idea
+*.md
+!api/**/*.md
+
+# Python
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Frontend (not needed for API image)
+frontend/
+frontend_temp/
+
+# Data, models, notebooks (too large; mount at runtime if needed)
+data/
+*.ipynb
+.cache/
+
+# Env files with secrets (set in platform dashboard)
+.env
+.env.local
+.env.*.local
+
+# Chrome extension
+chrome-extension/
+
+# Build artifacts
+build/
+dist/
+*.egg-info

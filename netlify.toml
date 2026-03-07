@@ -1,0 +1,7 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "build"
+
+[build.environment]
+  VITE_API_BASE_URL = "https://api.truthlens.app"
