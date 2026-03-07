@@ -626,7 +626,7 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
                 />
               </div>
               <button onClick={handleFetchUrl} disabled={!url.trim() || loadingUrl}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm transition-all flex-shrink-0"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white text-sm transition-all flex-shrink-0"
                 style={{ fontWeight: 600 }}
               >
                 {loadingUrl ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
@@ -665,7 +665,7 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
           <div className="flex-1 sm:flex-none" />
 
           <Button onClick={handleAnalyze} disabled={!canAnalyze}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-blue-500/30 disabled:opacity-50 transition-all duration-300 rounded-xl px-5"
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-blue-500/30 disabled:opacity-70 transition-all duration-300 rounded-xl px-5"
           >
             {isAnalyzing ? <><Loader2 className="size-4 mr-2 animate-spin" />Analyzing…</> : <><Sparkles className="size-4 mr-2" />Analyze with AI</>}
           </Button>
