@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from ..production_pipeline.pipeline_runner import PipelineRunner
 from ..production_pipeline.middlewares.llm_blackbox import LLMBlackbox
 
 router = APIRouter()
@@ -189,10 +190,27 @@ else:
     _STEP9_AVAILABLE = False
 
 
+def _merge_runner_result(result: dict) -> dict:
+    """Expose final-stage summary fields at the top level for frontend clients."""
+    merged = dict(result)
+    last_stage_output = result.get("last_stage_output")
+    if isinstance(last_stage_output, dict):
+        if "summary" not in merged and isinstance(last_stage_output.get("summary"), dict):
+            merged["summary"] = last_stage_output["summary"]
+        if "roberta" not in merged and isinstance(last_stage_output.get("roberta"), dict):
+            merged["roberta"] = last_stage_output["roberta"]
+    summary = merged.get("summary")
+    if isinstance(summary, dict):
+        # Chrome extension live-evaluation UI still looks for essay-shaped fields.
+        merged.setdefault("essay", dict(summary))
+    return merged
+
+
 @router.post("/process")
 async def process(request: Request):
     body = await request.json()
     user_claim = body.get("user_claim")
+    request_id = body.get("request_id")
 
     if not isinstance(user_claim, str) or not user_claim.strip():
         raise HTTPException(
@@ -203,41 +221,18 @@ async def process(request: Request):
     log_buffer = io.StringIO()
     try:
         with redirect_stdout(log_buffer):
-            # Steps 1–3: sync, cheap → run in threadpool for event-loop hygiene.
-            step1_out = await run_in_threadpool(process_user_claim, user_claim)
-            step2_out = await run_in_threadpool(process_step1_output, step1_out)
-            step3_out = await run_in_threadpool(process_step2_output, step2_out)
+            runner = PipelineRunner()
+            out = await runner.run(text_input=user_claim.strip(), request_id=request_id)
 
-            # Step 4: async (LLM query expansion)
-            step4_out = await process_step3_output(step3_out)
-
-            # Steps 5–8: async (HTTP + CPU-bound but already handled with async APIs)
-            step5_out = await process_step4_output(step4_out)
-            step6_out = await process_step5_output(step5_out)
-            step7_out = await process_step6_output(step6_out)
-            step8_out = await process_step7_output(step7_out)
-
-            if _STEP9_AVAILABLE and process_step8_output is not None:
-                try:
-                    step9_out = await process_step8_output(step8_out)
-                    out = step9_out
-                except Exception as e:
-                    if hasattr(e, "code"):
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "code": getattr(e, "code", "SUMMARY_ERROR"),
-                                "message": getattr(e, "message", str(e)),
-                                "details": getattr(e, "details", None),
-                            },
-                        )
-                    raise HTTPException(status_code=500, detail=str(e))
-            else:
-                out = step8_out
+        if isinstance(out, dict) and out.get("error"):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "PIPELINE_ERROR", "message": str(out["error"])},
+            )
 
         backend_log = (log_buffer.getvalue() or "").strip()
         if isinstance(out, dict):
-            out = dict(out)
+            out = _merge_runner_result(out)
             out["backend_log"] = backend_log
         return out
 
@@ -351,7 +346,7 @@ async def _stream_process_generator(user_claim: str):
     result = result_holder[0] if result_holder else None
     backend_log = "\n".join(collected)
     if isinstance(result, dict):
-        result = dict(result)
+        result = _merge_runner_result(result)
         result["backend_log"] = backend_log
     yield f"event: result\ndata: {json.dumps(result)}\n\n"
 

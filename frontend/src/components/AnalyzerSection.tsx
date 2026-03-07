@@ -18,6 +18,56 @@ export interface AnalysisResult {
   detail: string;
 }
 
+interface Citation {
+  title?: string;
+  url?: string;
+}
+
+interface LegacyAnalysisPayload {
+  prediction?: string;
+  label?: string;
+  confidence?: number;
+  explanation?: string;
+  detail?: string;
+  sources?: Citation[];
+}
+
+interface ProductionSummary {
+  intro?: string;
+  body1?: string;
+  body2?: string;
+  conclusion?: string;
+  verdict?: string;
+  confidence?: number;
+  citations?: Citation[];
+}
+
+interface ProductionAnalysisPayload {
+  final_prediction?: string;
+  confidence?: number;
+  summary?: ProductionSummary;
+  roberta?: {
+    confidence?: number;
+    label?: {
+      class_name?: string;
+    };
+  };
+  last_stage_output?: {
+    summary?: ProductionSummary;
+    roberta?: {
+      confidence?: number;
+      label?: {
+        class_name?: string;
+      };
+    };
+  };
+  meta?: {
+    warnings?: Array<{
+      message?: string;
+    }>;
+  };
+}
+
 // ── Model definitions ──────────────────────────────────────────────────────
 export const MODELS: { id: ModelId; label: string; shortLabel: string; desc: string; badge: string; badgeColor: string }[] = [
   {
@@ -90,18 +140,130 @@ async function getErrorMessage(response: Response): Promise<string> {
     if (typeof parsed?.detail === "string") {
       return parsed.detail;
     }
+    if (typeof parsed?.detail?.message === "string") {
+      return parsed.detail.message;
+    }
+    if (typeof parsed?.message === "string") {
+      return parsed.message;
+    }
+    if (typeof parsed?.error === "string") {
+      return parsed.error;
+    }
     return text || `Request failed with status ${response.status}`;
   } catch {
     return `Request failed with status ${response.status}`;
   }
 }
 
+function citationLabel(citation: Citation): string {
+  const title = String(citation?.title || "").trim();
+  const url = String(citation?.url || "").trim();
+  return title || url;
+}
+
+function appendSourceList(detail: string, sources: Citation[] | undefined): string {
+  const labels = (sources || [])
+    .map(citationLabel)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (labels.length === 0) {
+    return detail;
+  }
+
+  return `${detail}\n\nSources: ${labels.join(" | ")}`;
+}
+
+function parseLegacyResult(payload: LegacyAnalysisPayload): AnalysisResult {
+  const detail = String(
+    payload?.explanation || payload?.detail || "No explanation returned by backend."
+  );
+
+  return {
+    prediction: normalizePrediction(String(payload?.prediction || payload?.label || "")),
+    confidence: normalizeConfidence(Number(payload?.confidence || 0)),
+    detail: appendSourceList(detail, payload?.sources),
+  };
+}
+
+function buildProductionDetail(payload: ProductionAnalysisPayload): string {
+  const summaryParts = [
+    payload?.summary?.intro || payload?.last_stage_output?.summary?.intro,
+    payload?.summary?.body1 || payload?.last_stage_output?.summary?.body1,
+    payload?.summary?.body2 || payload?.last_stage_output?.summary?.body2,
+    payload?.summary?.conclusion || payload?.last_stage_output?.summary?.conclusion,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  if (summaryParts.length > 0) {
+    return appendSourceList(
+      summaryParts.join("\n\n"),
+      payload?.summary?.citations || payload?.last_stage_output?.summary?.citations
+    );
+  }
+
+  const verdict = normalizePrediction(
+    String(
+      payload?.final_prediction ||
+      payload?.summary?.verdict ||
+      payload?.last_stage_output?.summary?.verdict ||
+      payload?.roberta?.label?.class_name ||
+      payload?.last_stage_output?.roberta?.label?.class_name ||
+      ""
+    )
+  );
+
+  const confidence = normalizeConfidence(
+    Number(
+      payload?.summary?.confidence ||
+      payload?.last_stage_output?.summary?.confidence ||
+      payload?.confidence ||
+      payload?.roberta?.confidence ||
+      payload?.last_stage_output?.roberta?.confidence ||
+      0
+    )
+  );
+
+  const warning = String(payload?.meta?.warnings?.[0]?.message || "").trim();
+  return warning
+    ? `Production pipeline verdict: ${verdict} (${confidence}% confidence).\n\n${warning}`
+    : `Production pipeline verdict: ${verdict} (${confidence}% confidence).`;
+}
+
+function parseProductionResult(payload: ProductionAnalysisPayload): AnalysisResult {
+  return {
+    prediction: normalizePrediction(
+      String(
+        payload?.final_prediction ||
+        payload?.summary?.verdict ||
+        payload?.last_stage_output?.summary?.verdict ||
+        payload?.roberta?.label?.class_name ||
+        payload?.last_stage_output?.roberta?.label?.class_name ||
+        ""
+      )
+    ),
+    confidence: normalizeConfidence(
+      Number(
+        payload?.summary?.confidence ||
+        payload?.last_stage_output?.summary?.confidence ||
+        payload?.confidence ||
+        payload?.roberta?.confidence ||
+        payload?.last_stage_output?.roberta?.confidence ||
+        0
+      )
+    ),
+    detail: buildProductionDetail(payload),
+  };
+}
+
 async function analyzeWithBackend(text: string, modelId: ModelId): Promise<AnalysisResult> {
-  const endpoint = modelId === "llm-encoder" ? "/analyze" : "/predict";
+  const endpoint = modelId === "llm-encoder" ? "/analyze" : "/api/pipeline/process-text";
+  const body = { text };
   const response = await fetch(apiUrl(endpoint), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -109,11 +271,9 @@ async function analyzeWithBackend(text: string, modelId: ModelId): Promise<Analy
   }
 
   const payload = await response.json();
-  return {
-    prediction: normalizePrediction(String(payload?.prediction || payload?.label || "")),
-    confidence: normalizeConfidence(Number(payload?.confidence || 0)),
-    detail: String(payload?.explanation || payload?.detail || "No explanation returned by backend."),
-  };
+  return modelId === "llm-encoder"
+    ? parseLegacyResult(payload as LegacyAnalysisPayload)
+    : parseProductionResult(payload as ProductionAnalysisPayload);
 }
 
 async function extractTextFromPDF(file: File): Promise<string> {

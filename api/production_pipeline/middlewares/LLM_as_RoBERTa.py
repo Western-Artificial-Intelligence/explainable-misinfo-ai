@@ -63,7 +63,7 @@ Classify the following claim. One word only."""
 
 
 def _load_dotenv() -> None:
-    """Load .env from project root so env vars are set when server runs from any cwd."""
+    """Load repo env files so local overrides work when server runs from any cwd."""
     try:
         from dotenv import load_dotenv  # type: ignore
     except Exception:
@@ -72,19 +72,28 @@ def _load_dotenv() -> None:
     for _ in range(6):
         path = path.parent
         env_file = path / ".env"
+        env_local_file = path / ".env.local"
+        loaded = False
         if env_file.is_file():
-            load_dotenv(env_file, override=True)
+            load_dotenv(env_file, override=False)
+            loaded = True
+        if env_local_file.is_file():
+            load_dotenv(env_local_file, override=True)
+            loaded = True
+        if loaded:
             return
     load_dotenv(override=True)
 
 
 def _debug_always_false_from_env_file() -> bool:
-    """Read .env from repo root and return True if LLM_AS_ROBERTA_DEBUG_ALWAYS_FALSE is true."""
+    """Read repo env files and return True if LLM_AS_ROBERTA_DEBUG_ALWAYS_FALSE is true."""
     path = Path(__file__).resolve()
     for _ in range(6):
         path = path.parent
-        env_file = path / ".env"
-        if env_file.is_file():
+        env_files = [path / ".env", path / ".env.local"]
+        for env_file in env_files:
+            if not env_file.is_file():
+                continue
             try:
                 text = env_file.read_text(encoding="utf-8", errors="replace")
                 for line in text.splitlines():
@@ -96,7 +105,6 @@ def _debug_always_false_from_env_file() -> bool:
                         return val.strip().lower() in ("1", "true", "yes")
             except Exception:
                 pass
-            return False
     return False
 
 

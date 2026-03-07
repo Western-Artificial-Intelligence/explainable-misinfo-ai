@@ -7,17 +7,21 @@ logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
-# Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
-_env_path = Path(__file__).resolve().parent.parent / ".env"
+# Load repo env files before importing routes so pipeline steps see runtime config.
+_repo_root = Path(__file__).resolve().parent.parent
+_env_path = _repo_root / ".env"
+_env_local_path = _repo_root / ".env.local"
 if _env_path.is_file():
     load_dotenv(_env_path, override=False)
-else:
+if _env_local_path.is_file():
+    load_dotenv(_env_local_path, override=True)
+if not _env_path.is_file() and not _env_local_path.is_file():
     load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import classify, documents, health, production
+from .routes import classify, documents, health, history, production
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
@@ -36,6 +40,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(classify.router)
 app.include_router(documents.router)
+app.include_router(history.router)
 
 # Audio extraction and voice-to-text route
 try:
