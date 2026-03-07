@@ -40,10 +40,22 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="TruthLens API", version="0.1.0")
 
 
-class AddCORSHeadersMiddleware(BaseHTTPMiddleware):
-    """Ensure CORS headers on every response (safety net for preflight and errors)."""
+class CORSPreflightMiddleware(BaseHTTPMiddleware):
+    """Handle OPTIONS preflight immediately with CORS headers."""
 
     async def dispatch(self, request, call_next):
+        if request.method == "OPTIONS":
+            from starlette.responses import Response
+
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
         response = await call_next(request)
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
@@ -52,7 +64,7 @@ class AddCORSHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app.add_middleware(AddCORSHeadersMiddleware)
+app.add_middleware(CORSPreflightMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
