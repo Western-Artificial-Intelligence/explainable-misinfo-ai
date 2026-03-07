@@ -27,6 +27,7 @@ if not _env_path.is_file() and not _env_local_path.is_file():
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .routes import analysis, classify, documents, health, history
 from .utils.history_store import get_store_mode
@@ -38,10 +39,20 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
 
-# Enable CORS:
-# CORS (Cross-Origin Resource Sharing) allows frontend hosted on a different domain
-# to make API requests to this backend without being blocked by the browser.
-# Use explicit middleware so headers are present even on errors and preflight.
+
+class AddCORSHeadersMiddleware(BaseHTTPMiddleware):
+    """Ensure CORS headers on every response (safety net for preflight and errors)."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Max-Age"] = "86400"
+        return response
+
+
+app.add_middleware(AddCORSHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
