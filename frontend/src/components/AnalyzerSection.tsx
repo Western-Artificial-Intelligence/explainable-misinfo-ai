@@ -22,6 +22,56 @@ export interface AnalysisResult {
   rawResult: Record<string, unknown>;
 }
 
+interface Citation {
+  title?: string;
+  url?: string;
+}
+
+interface LegacyAnalysisPayload {
+  prediction?: string;
+  label?: string;
+  confidence?: number;
+  explanation?: string;
+  detail?: string;
+  sources?: Citation[];
+}
+
+interface ProductionSummary {
+  intro?: string;
+  body1?: string;
+  body2?: string;
+  conclusion?: string;
+  verdict?: string;
+  confidence?: number;
+  citations?: Citation[];
+}
+
+interface ProductionAnalysisPayload {
+  final_prediction?: string;
+  confidence?: number;
+  summary?: ProductionSummary;
+  roberta?: {
+    confidence?: number;
+    label?: {
+      class_name?: string;
+    };
+  };
+  last_stage_output?: {
+    summary?: ProductionSummary;
+    roberta?: {
+      confidence?: number;
+      label?: {
+        class_name?: string;
+      };
+    };
+  };
+  meta?: {
+    warnings?: Array<{
+      message?: string;
+    }>;
+  };
+}
+
 // ── Model definitions ──────────────────────────────────────────────────────
 export const MODELS: { id: ModelId; label: string; shortLabel: string; desc: string; badge: string; badgeColor: string }[] = [
   {
@@ -94,6 +144,15 @@ async function getErrorMessage(response: Response): Promise<string> {
     const parsed = JSON.parse(text);
     if (typeof parsed?.detail === "string") {
       return parsed.detail;
+    }
+    if (typeof parsed?.detail?.message === "string") {
+      return parsed.detail.message;
+    }
+    if (typeof parsed?.message === "string") {
+      return parsed.message;
+    }
+    if (typeof parsed?.error === "string") {
+      return parsed.error;
     }
     return text || `Request failed with status ${response.status}`;
   } catch {

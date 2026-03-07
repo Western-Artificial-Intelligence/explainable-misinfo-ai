@@ -212,6 +212,8 @@ class PipelineRunner:
         logger.info(f"Starting pipeline: {self.request_id}")
 
         from_media = False
+        fast_web_mode = bool(kwargs.get("fast_web_mode"))
+        skip_summary = bool(kwargs.get("skip_summary"))
 
         # ---- Stage 0: Audio Extraction ----
         if media_source and media_type:
@@ -279,6 +281,8 @@ class PipelineRunner:
                 step3_out = _process_step2_output(step2_out)
             else:
                 step3_out = self._fallback_stage_3(step2_out)
+            if fast_web_mode:
+                step3_out = self._apply_fast_web_profile(step3_out)
             self.pipeline_stages["3_routing_policy"] = step3_out
             self._log_stage("3_routing_policy", step3_out)
         except Exception as e:
@@ -296,8 +300,9 @@ class PipelineRunner:
                 ("6_mmr_selection",        _process_step5_output),
                 ("7_light_relevance_gate", _process_step6_output),
                 ("8_explainability_shap",  _process_step7_output),
-                ("9_llm_summarization",    _process_step8_output),
             ]
+            if not skip_summary:
+                async_stages.append(("9_llm_summarization", _process_step8_output))
             for stage_name, stage_fn in async_stages:
                 if stage_fn is None:
                     logger.info("Stage %s: module not loaded, skipping", stage_name)
@@ -412,6 +417,24 @@ class PipelineRunner:
             **step2_out,
             "routing_decision": routing_decision,
         }
+
+    def _apply_fast_web_profile(self, step3_out: Dict[str, Any]) -> Dict[str, Any]:
+        """Trim query expansion and retrieval sizes for fast text-only web checks."""
+        out = dict(step3_out)
+        routing = dict(out.get("routing") or {})
+        rag = dict(routing.get("rag") or {})
+        rag.update(
+            {
+                "use_query_expansion": False,
+                "query_variants": 0,
+                "candidate_pool_size_m": min(int(rag.get("candidate_pool_size_m") or 100), 12),
+                "mmr_top_n": min(int(rag.get("mmr_top_n") or 12), 6),
+                "final_top_k": min(int(rag.get("final_top_k") or 6), 3),
+            }
+        )
+        routing["rag"] = rag
+        out["routing"] = routing
+        return out
 
     # ------------------------------------------------------------------
     # Result building

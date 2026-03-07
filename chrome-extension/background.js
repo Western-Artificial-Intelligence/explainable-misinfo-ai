@@ -1,4 +1,5 @@
-const DEFAULT_API_BASE = "http://localhost:8000";
+const DEFAULT_API_BASE = "http://127.0.0.1:8011";
+const LEGACY_API_BASES = new Set(["http://localhost:8000", "http://127.0.0.1:8000"]);
 const MENU_ID_ANALYZE_SELECTION = "truthlens-analyze-selection";
 const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
 
@@ -326,7 +327,8 @@ async function analyzeBatch(items, tabId, defaultContext = {}) {
 async function getApiBase() {
   return new Promise((resolve) => {
     chrome.storage.sync.get({ backendUrl: DEFAULT_API_BASE }, (items) => {
-      resolve(items.backendUrl.replace(/\/$/, ""));
+      const raw = String(items.backendUrl || DEFAULT_API_BASE).replace(/\/$/, "");
+      resolve(LEGACY_API_BASES.has(raw) ? DEFAULT_API_BASE : raw);
     });
   });
 }
@@ -381,7 +383,7 @@ async function callAnalyze(text) {
 async function callProcess(userClaim, context = {}) {
   const cleanText = String(userClaim || "").trim();
   if (!cleanText) {
-    throw new Error("user_claim cannot be empty.");
+    throw new Error("text cannot be empty.");
   }
 
   const base = await getApiBase();

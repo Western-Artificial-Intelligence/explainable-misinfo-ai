@@ -7,11 +7,15 @@ logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
-# Load .env before importing routes so pipeline steps (e.g. Step 2) see ROBERTA_USE_LLM etc.
-_env_path = Path(__file__).resolve().parent.parent / ".env"
+# Load repo env files before importing routes so pipeline steps see runtime config.
+_repo_root = Path(__file__).resolve().parent.parent
+_env_path = _repo_root / ".env"
+_env_local_path = _repo_root / ".env.local"
 if _env_path.is_file():
     load_dotenv(_env_path, override=False)
-else:
+if _env_local_path.is_file():
+    load_dotenv(_env_local_path, override=True)
+if not _env_path.is_file() and not _env_local_path.is_file():
     load_dotenv()
 
 from fastapi import FastAPI

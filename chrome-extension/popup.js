@@ -345,11 +345,15 @@ function startLiveEvaluatePolling() {
   }, LIVE_EVALUATE_POLL_MS);
 }
 
+const DEFAULT_API_BASE = "http://127.0.0.1:8011";
+const LEGACY_API_BASES = new Set(["http://localhost:8000", "http://127.0.0.1:8000"]);
+
 async function checkBackendStatus() {
   if (!backendStatus) return;
   const base = await new Promise((resolve) => {
-    chrome.storage.sync.get({ backendUrl: "http://localhost:8000" }, (items) => {
-      resolve(String(items.backendUrl || "http://localhost:8000").replace(/\/$/, ""));
+    chrome.storage.sync.get({ backendUrl: DEFAULT_API_BASE }, (items) => {
+      const raw = String(items.backendUrl || DEFAULT_API_BASE).replace(/\/$/, "");
+      resolve(LEGACY_API_BASES.has(raw) ? DEFAULT_API_BASE : raw);
     });
   });
   try {
@@ -362,7 +366,7 @@ async function checkBackendStatus() {
       backendStatus.className = "tlx-backend-status tlx-backend-error";
     }
   } catch (e) {
-    backendStatus.textContent = "Backend not reachable. Start: uvicorn api.main:app --reload";
+    backendStatus.textContent = "Backend not reachable. Start: .\\.venv\\Scripts\\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8011";
     backendStatus.className = "tlx-backend-status tlx-backend-error";
   }
 }
