@@ -25,6 +25,7 @@ const TLX_IMAGE_STATE = {
   analyser: null,
   tesseractAvailable: false,
 };
+const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
 
 // ==========================================
 // Audio Analysis for Silence Detection
@@ -679,6 +680,7 @@ async function sendImageAndTextForAnalysis() {
   try {
     const backendUrl = await getBackendUrl();
     const apiUrl = `${backendUrl}/api/image/analyze-claim`;
+    const sessionId = await getExtensionSessionId();
 
     console.log(`[TruthLens] Sending ${TLX_IMAGE_STATE.extractedFrames.length} frames to: ${apiUrl}`);
 
@@ -688,6 +690,10 @@ async function sendImageAndTextForAnalysis() {
     formData.append('frame_count', TLX_IMAGE_STATE.extractedFrames.length);
     formData.append('audio_analysis', JSON.stringify(TLX_IMAGE_STATE.audioAnalysis));
     formData.append('captured_text', JSON.stringify(TLX_IMAGE_STATE.extractedText));
+    formData.append('session_id', sessionId);
+    formData.append('page_url', location.href);
+    formData.append('source_context', 'chrome_extension');
+    formData.append('input_type', 'image_text_capture');
 
     // Append frame images
     TLX_IMAGE_STATE.extractedFrames.forEach((frame, index) => {
@@ -738,6 +744,23 @@ async function getBackendUrl() {
     chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8011' }, (items) => {
       const raw = String(items.backendUrl || 'http://127.0.0.1:8011').replace(/\/$/, '');
       resolve((raw === 'http://localhost:8000' || raw === 'http://127.0.0.1:8000') ? 'http://127.0.0.1:8011' : raw);
+    });
+  });
+}
+
+async function getExtensionSessionId() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [EXTENSION_SESSION_STORAGE_KEY]: "" }, async (items) => {
+      const existing = String(items?.[EXTENSION_SESSION_STORAGE_KEY] || "").trim();
+      if (existing) {
+        resolve(existing);
+        return;
+      }
+      const created = `ext_${Date.now()}_${crypto.randomUUID()}`;
+      try {
+        await chrome.storage.local.set({ [EXTENSION_SESSION_STORAGE_KEY]: created });
+      } catch (_) {}
+      resolve(created);
     });
   });
 }

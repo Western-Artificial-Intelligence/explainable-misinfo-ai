@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import logging
 import queue
 import sys
 import threading
@@ -16,8 +17,10 @@ from starlette.concurrency import run_in_threadpool
 
 from ..production_pipeline.pipeline_runner import PipelineRunner
 from ..production_pipeline.middlewares.llm_blackbox import LLMBlackbox
+from ..utils.analysis_store import add_analysis_record
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class _LineBufferedStdout:
@@ -190,27 +193,97 @@ else:
     _STEP9_AVAILABLE = False
 
 
-def _merge_runner_result(result: dict) -> dict:
-    """Expose final-stage summary fields at the top level for frontend clients."""
-    merged = dict(result)
-    last_stage_output = result.get("last_stage_output")
-    if isinstance(last_stage_output, dict):
-        if "summary" not in merged and isinstance(last_stage_output.get("summary"), dict):
-            merged["summary"] = last_stage_output["summary"]
-        if "roberta" not in merged and isinstance(last_stage_output.get("roberta"), dict):
-            merged["roberta"] = last_stage_output["roberta"]
-    summary = merged.get("summary")
-    if isinstance(summary, dict):
-        # Chrome extension live-evaluation UI still looks for essay-shaped fields.
-        merged.setdefault("essay", dict(summary))
-    return merged
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_verdict(value: object) -> str:
+    raw = str(value or "").strip().upper()
+    if raw in {"TRUE", "FALSE", "MIXED"}:
+        return raw
+    if raw in {"REAL", "FACTUAL", "RELIABLE"}:
+        return "TRUE"
+    if raw in {"FAKE", "MISINFORMATION", "NOT_REAL"}:
+        return "FALSE"
+    return "MIXED"
+
+
+def _extract_confidence_reasoning_verdict(out: dict) -> tuple[float, str, str]:
+    summary = out.get("summary") if isinstance(out.get("summary"), dict) else {}
+    roberta = out.get("roberta") if isinstance(out.get("roberta"), dict) else {}
+    label = roberta.get("label") if isinstance(roberta.get("label"), dict) else {}
+
+    confidence = _safe_float(summary.get("confidence"), default=-1.0)
+    if confidence < 0:
+        confidence = _safe_float(roberta.get("confidence"), default=-1.0)
+    if confidence < 0:
+        confidence = _safe_float(label.get("confidence"), default=0.0)
+
+    reasoning = str(
+        summary.get("conclusion")
+        or summary.get("intro")
+        or out.get("backend_log")
+        or ""
+    ).strip()
+
+    verdict = _normalize_verdict(
+        summary.get("verdict")
+        or label.get("class_name")
+        or roberta.get("prediction")
+        or ""
+    )
+    return confidence, reasoning, verdict
+
+
+def _should_persist(meta: dict) -> bool:
+    explicit = meta.get("persist_result")
+    if isinstance(explicit, bool):
+        return explicit
+    if isinstance(explicit, str):
+        return explicit.strip().lower() in {"1", "true", "yes", "y"}
+    return str(meta.get("source_context") or "").strip().lower() == "chrome_extension"
+
+
+def _build_analysis_record(meta: dict, out: dict, user_claim: str) -> dict:
+    confidence, reasoning, verdict = _extract_confidence_reasoning_verdict(out)
+    return {
+        "session_id": meta.get("session_id") or "unknown-session",
+        "input_type": meta.get("input_type") or "text",
+        "input_text": meta.get("input_text") or user_claim,
+        "transcript": meta.get("transcript") or "",
+        "page_url": meta.get("page_url") or "",
+        "analysis_result": out,
+        "confidence": confidence,
+        "reasoning": reasoning,
+        "verdict": verdict,
+        "timestamp": meta.get("timestamp"),
+        "source_context": meta.get("source_context") or "unknown",
+    }
+
+
+async def _persist_analysis_if_requested(meta: dict, out: object, user_claim: str) -> None:
+    if not _should_persist(meta) or not isinstance(out, dict):
+        return
+    record = _build_analysis_record(meta, out, user_claim)
+    try:
+        await run_in_threadpool(add_analysis_record, record)
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to persist /api/process result for source=%s", meta.get("source_context"))
 
 
 @router.post("/process")
 async def process(request: Request):
     body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "BAD_REQUEST", "message": "Request body must be a JSON object"},
+        )
     user_claim = body.get("user_claim")
-    request_id = body.get("request_id")
+    metadata = body
 
     if not isinstance(user_claim, str) or not user_claim.strip():
         raise HTTPException(
@@ -234,6 +307,7 @@ async def process(request: Request):
         if isinstance(out, dict):
             out = _merge_runner_result(out)
             out["backend_log"] = backend_log
+        await _persist_analysis_if_requested(metadata, out, user_claim)
         return out
 
     except IngestClaimError as e:
@@ -302,7 +376,7 @@ def _run_pipeline_in_thread(
         loop.close()
 
 
-async def _stream_process_generator(user_claim: str):
+async def _stream_process_generator(user_claim: str, metadata: dict):
     import asyncio
 
     log_queue: queue.Queue = queue.Queue()
@@ -348,6 +422,7 @@ async def _stream_process_generator(user_claim: str):
     if isinstance(result, dict):
         result = _merge_runner_result(result)
         result["backend_log"] = backend_log
+    await _persist_analysis_if_requested(metadata, result, user_claim)
     yield f"event: result\ndata: {json.dumps(result)}\n\n"
 
 
@@ -355,14 +430,20 @@ async def _stream_process_generator(user_claim: str):
 async def process_stream(request: Request):
     """Stream backend log lines as SSE, then send final result. For real-time log in the extension."""
     body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "BAD_REQUEST", "message": "Request body must be a JSON object"},
+        )
     user_claim = body.get("user_claim")
+    metadata = body
     if not isinstance(user_claim, str) or not user_claim.strip():
         raise HTTPException(
             status_code=400,
             detail={"code": "BAD_REQUEST", "message": "user_claim must be a non-empty string"},
         )
     return StreamingResponse(
-        _stream_process_generator(user_claim.strip()),
+        _stream_process_generator(user_claim.strip(), metadata),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

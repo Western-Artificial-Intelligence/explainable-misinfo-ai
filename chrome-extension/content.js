@@ -229,7 +229,9 @@ async function analyzeVisiblePage() {
 
   const response = await chrome.runtime.sendMessage({
     type: "ANALYZE_BATCH",
-    items: payloadItems
+    items: payloadItems,
+    inputType: "page_analysis",
+    pageUrl: location.href
   });
 
   if (!response?.ok) {
@@ -504,4 +506,3 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-

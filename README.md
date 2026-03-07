@@ -371,7 +371,7 @@ Backedn
 cd /Users/aryankhimani/Downloads/WAI_Project/explainable-misinfo-ai
 source .venv/bin/activate
 pip install -r requirements.txt
-
+cp .env.example .env.local
 # set real password in MONGO_URI
 uvicorn api.main:app --reload
 

@@ -21,7 +21,12 @@ if not _env_path.is_file() and not _env_local_path.is_file():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import classify, documents, health, history, production
+from .routes import analysis, classify, documents, health, history
+from .utils.history_store import get_store_mode
+
+load_dotenv()
+load_dotenv(".env.local", override=True)  # Local overrides (e.g. API keys)
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app instance
 app = FastAPI(title="TruthLens API", version="0.1.0")
@@ -41,6 +46,13 @@ app.include_router(health.router)
 app.include_router(classify.router)
 app.include_router(documents.router)
 app.include_router(history.router)
+app.include_router(analysis.router)
+
+
+@app.on_event("startup")
+def startup_checks() -> None:
+    mode = get_store_mode()
+    logger.info("History storage mode: %s", mode)
 
 # Audio extraction and voice-to-text route
 try:

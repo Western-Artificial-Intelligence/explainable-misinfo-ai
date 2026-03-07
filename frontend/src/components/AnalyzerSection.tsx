@@ -16,6 +16,10 @@ export interface AnalysisResult {
   prediction: Prediction;
   confidence: number;
   detail: string;
+  reasoning: string;
+  detectedClaims: string[];
+  supportingEvidence: Array<{ title: string; url: string; snippet: string }>;
+  rawResult: Record<string, unknown>;
 }
 
 interface Citation {
@@ -105,6 +109,7 @@ const examples = [
 ];
 
 const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) || "").replace(/\/$/, "");
+const FRONTEND_SESSION_KEY = "truthlens-web-session-id";
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
@@ -155,115 +160,78 @@ async function getErrorMessage(response: Response): Promise<string> {
   }
 }
 
-function citationLabel(citation: Citation): string {
-  const title = String(citation?.title || "").trim();
-  const url = String(citation?.url || "").trim();
-  return title || url;
-}
-
-function appendSourceList(detail: string, sources: Citation[] | undefined): string {
-  const labels = (sources || [])
-    .map(citationLabel)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (labels.length === 0) {
-    return detail;
+function getOrCreateFrontendSessionId(): string {
+  try {
+    const existing = localStorage.getItem(FRONTEND_SESSION_KEY);
+    if (existing && existing.trim()) return existing;
+    const generated = `web_${Date.now()}_${crypto.randomUUID()}`;
+    localStorage.setItem(FRONTEND_SESSION_KEY, generated);
+    return generated;
+  } catch {
+    return `web_${Date.now()}`;
   }
-
-  return `${detail}\n\nSources: ${labels.join(" | ")}`;
 }
 
-function parseLegacyResult(payload: LegacyAnalysisPayload): AnalysisResult {
-  const detail = String(
-    payload?.explanation || payload?.detail || "No explanation returned by backend."
-  );
-
-  return {
-    prediction: normalizePrediction(String(payload?.prediction || payload?.label || "")),
-    confidence: normalizeConfidence(Number(payload?.confidence || 0)),
-    detail: appendSourceList(detail, payload?.sources),
-  };
+function mapInputType(mode: InputMode): string {
+  if (mode === "url") return "page_analysis";
+  if (mode === "file") return "document";
+  return "selected_text";
 }
 
-function buildProductionDetail(payload: ProductionAnalysisPayload): string {
-  const summaryParts = [
-    payload?.summary?.intro || payload?.last_stage_output?.summary?.intro,
-    payload?.summary?.body1 || payload?.last_stage_output?.summary?.body1,
-    payload?.summary?.body2 || payload?.last_stage_output?.summary?.body2,
-    payload?.summary?.conclusion || payload?.last_stage_output?.summary?.conclusion,
-  ]
-    .map((part) => String(part || "").trim())
+function extractReasoning(payload: any): string {
+  const summary = payload?.summary || {};
+  return String(summary?.conclusion || summary?.intro || payload?.backend_log || "No reasoning returned by pipeline.");
+}
+
+function extractDetectedClaims(payload: any): string[] {
+  const claims = [payload?.normalized_claim, payload?.user_claim]
+    .map((item) => String(item || "").trim())
     .filter(Boolean);
+  return [...new Set(claims)].slice(0, 5);
+}
 
-  if (summaryParts.length > 0) {
-    return appendSourceList(
-      summaryParts.join("\n\n"),
-      payload?.summary?.citations || payload?.last_stage_output?.summary?.citations
-    );
+function extractSupportingEvidence(payload: any): Array<{ title: string; url: string; snippet: string }> {
+  const summaryCitations = Array.isArray(payload?.summary?.citations) ? payload.summary.citations : [];
+  if (summaryCitations.length > 0) {
+    return summaryCitations
+      .map((citation: any) => ({
+        title: String(citation?.title || citation?.source || "Evidence source"),
+        url: String(citation?.url || ""),
+        snippet: String(citation?.snippet || ""),
+      }))
+      .slice(0, 5);
   }
 
-  const verdict = normalizePrediction(
-    String(
-      payload?.final_prediction ||
-      payload?.summary?.verdict ||
-      payload?.last_stage_output?.summary?.verdict ||
-      payload?.roberta?.label?.class_name ||
-      payload?.last_stage_output?.roberta?.label?.class_name ||
-      ""
-    )
-  );
-
-  const confidence = normalizeConfidence(
-    Number(
-      payload?.summary?.confidence ||
-      payload?.last_stage_output?.summary?.confidence ||
-      payload?.confidence ||
-      payload?.roberta?.confidence ||
-      payload?.last_stage_output?.roberta?.confidence ||
-      0
-    )
-  );
-
-  const warning = String(payload?.meta?.warnings?.[0]?.message || "").trim();
-  return warning
-    ? `Production pipeline verdict: ${verdict} (${confidence}% confidence).\n\n${warning}`
-    : `Production pipeline verdict: ${verdict} (${confidence}% confidence).`;
+  const topItems = Array.isArray(payload?.evidence_topk?.items) ? payload.evidence_topk.items : [];
+  return topItems
+    .map((item: any) => ({
+      title: String(item?.doc?.title || item?.doc?.source || "Evidence source"),
+      url: String(item?.doc?.url || ""),
+      snippet: String(item?.text || ""),
+    }))
+    .filter((item: { title: string; url: string; snippet: string }) => item.snippet || item.title || item.url)
+    .slice(0, 5);
 }
 
-function parseProductionResult(payload: ProductionAnalysisPayload): AnalysisResult {
-  return {
-    prediction: normalizePrediction(
-      String(
-        payload?.final_prediction ||
-        payload?.summary?.verdict ||
-        payload?.last_stage_output?.summary?.verdict ||
-        payload?.roberta?.label?.class_name ||
-        payload?.last_stage_output?.roberta?.label?.class_name ||
-        ""
-      )
-    ),
-    confidence: normalizeConfidence(
-      Number(
-        payload?.summary?.confidence ||
-        payload?.last_stage_output?.summary?.confidence ||
-        payload?.confidence ||
-        payload?.roberta?.confidence ||
-        payload?.last_stage_output?.roberta?.confidence ||
-        0
-      )
-    ),
-    detail: buildProductionDetail(payload),
-  };
-}
-
-async function analyzeWithBackend(text: string, modelId: ModelId): Promise<AnalysisResult> {
-  const endpoint = modelId === "llm-encoder" ? "/analyze" : "/api/pipeline/process-text";
-  const body = { text };
-  const response = await fetch(apiUrl(endpoint), {
+async function analyzeWithBackend(
+  text: string,
+  mode: InputMode,
+  pageUrl: string,
+): Promise<AnalysisResult> {
+  const response = await fetch(apiUrl("/api/process"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      user_claim: text,
+      session_id: getOrCreateFrontendSessionId(),
+      source_context: "frontend_website",
+      input_type: mapInputType(mode),
+      input_text: text,
+      transcript: mode === "text" ? text : "",
+      page_url: pageUrl || "",
+      persist_result: false,
+      timestamp: Date.now(),
+    }),
   });
 
   if (!response.ok) {
@@ -271,9 +239,54 @@ async function analyzeWithBackend(text: string, modelId: ModelId): Promise<Analy
   }
 
   const payload = await response.json();
-  return modelId === "llm-encoder"
-    ? parseLegacyResult(payload as LegacyAnalysisPayload)
-    : parseProductionResult(payload as ProductionAnalysisPayload);
+  const roberta = payload?.roberta || {};
+  const summary = payload?.summary || {};
+  const label = roberta?.label || {};
+  const verdictRaw = summary?.verdict || label?.class_name || "";
+  const confidenceRaw = summary?.confidence ?? roberta?.confidence ?? label?.confidence ?? 0;
+  const reasoning = extractReasoning(payload);
+  const detectedClaims = extractDetectedClaims(payload);
+  const supportingEvidence = extractSupportingEvidence(payload);
+
+  return {
+    prediction: normalizePrediction(String(verdictRaw)),
+    confidence: normalizeConfidence(Number(confidenceRaw)),
+    detail: reasoning,
+    reasoning,
+    detectedClaims,
+    supportingEvidence,
+    rawResult: payload,
+  };
+}
+
+async function persistAnalysisToMongo(args: {
+  mode: InputMode;
+  text: string;
+  url: string;
+  result: AnalysisResult;
+}) {
+  const { mode, text, url, result } = args;
+  try {
+    await fetch(apiUrl("/analysis"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: getOrCreateFrontendSessionId(),
+        input_type: mapInputType(mode),
+        input_text: text,
+        transcript: mode === "text" ? text : "",
+        page_url: mode === "url" ? url.trim() : "",
+        analysis_result: result.rawResult,
+        confidence: Number((result.confidence / 100).toFixed(4)),
+        reasoning: result.reasoning,
+        verdict: result.prediction,
+        timestamp: Date.now(),
+        source_context: "frontend_website",
+      }),
+    });
+  } catch {
+    // Best effort only. Local history save remains intact.
+  }
 }
 
 async function extractTextFromPDF(file: File): Promise<string> {
@@ -433,6 +446,10 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
       prediction: restoredEntry.prediction,
       confidence: restoredEntry.confidence,
       detail: restoredEntry.detail,
+      reasoning: restoredEntry.detail,
+      detectedClaims: [restoredEntry.text].filter(Boolean),
+      supportingEvidence: [],
+      rawResult: {},
     });
     setActiveExample(null);
     setSelectedModel(restoredEntry.model);
@@ -474,7 +491,7 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
     setAnalyzeError("");
     setResult(null);
     try {
-      const res = await analyzeWithBackend(text, selectedModel);
+      const res = await analyzeWithBackend(text, mode, mode === "url" ? url : "");
       setResult(res);
       const modelMeta = MODELS.find((m) => m.id === selectedModel)!;
       onResult?.({
@@ -485,6 +502,12 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
         detail: res.detail,
         model: selectedModel,
         modelLabel: modelMeta.label,
+      });
+      void persistAnalysisToMongo({
+        mode,
+        text,
+        url,
+        result: res,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Analysis failed. Please try again.";
@@ -703,7 +726,7 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
                     <Cpu className="size-3" />{modelMeta.label}
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{result.detail}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{result.reasoning}</p>
               </div>
             </div>
             <div className="space-y-2">
@@ -718,6 +741,40 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
                 {result.confidence >= 80 ? "High confidence — strong indicators detected." : result.confidence >= 60 ? "Moderate confidence — some ambiguity present." : "Low confidence — not enough clear signals."}
               </p>
             </div>
+            {result.detectedClaims.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2" style={{ fontWeight: 600 }}>Detected Claims</p>
+                <div className="space-y-2">
+                  {result.detectedClaims.map((claim, idx) => (
+                    <p key={`${claim}-${idx}`} className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                      {claim}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            {result.supportingEvidence.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2" style={{ fontWeight: 600 }}>Supporting Evidence</p>
+                <div className="space-y-3">
+                  {result.supportingEvidence.map((item, idx) => (
+                    <div key={`${item.title}-${idx}`} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-900/40 p-3">
+                      <p className="text-sm text-gray-800 dark:text-gray-200" style={{ fontWeight: 600 }}>{item.title || "Evidence source"}</p>
+                      {item.url && (
+                        <a href={item.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 dark:text-blue-400 break-all">
+                          {item.url}
+                        </a>
+                      )}
+                      {item.snippet && (
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
+                          {item.snippet.length > 220 ? `${item.snippet.slice(0, 220)}...` : item.snippet}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
