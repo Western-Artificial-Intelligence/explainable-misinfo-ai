@@ -423,13 +423,26 @@ function normalizeProcessResponse(data) {
     || "Processed via full pipeline.";
 
   const citations = summary.citations || [];
-  const sources = Array.isArray(citations)
+  let sources = Array.isArray(citations)
     ? citations.map((c) => ({
         title: c?.title || c?.source || "",
         url: c?.url || "",
         snippet: c?.snippet || ""
       }))
     : [];
+  if (sources.length === 0) {
+    const evidenceTopk = data?.evidence_topk ?? data?.last_stage_output?.evidence_topk;
+    const items = Array.isArray(evidenceTopk?.items) ? evidenceTopk.items : [];
+    sources = items.slice(0, 8).map((item) => {
+      const doc = item?.doc ?? {};
+      const url = doc.url ?? (typeof doc.source === "string" && doc.source.startsWith("http") ? doc.source : "");
+      return {
+        title: doc?.title || doc?.source || "",
+        url: url || "",
+        snippet: item?.text || ""
+      };
+    }).filter((s) => s.title || s.url || s.snippet);
+  }
 
   const intro = (summary.intro || "").trim();
   const body1 = (summary.body1 || "").trim();

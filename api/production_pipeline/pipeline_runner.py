@@ -55,17 +55,28 @@ def _load_stage_module(name: str, filepath: Path):
 
 
 # ---------------------------------------------------------------------------
-# Stage 0 – Audio extraction (optional, needs whisper)
+# Stage 0 – Audio extraction (optional, needs whisper). Load lazily so server
+# startup is not blocked by heavy whisper/numpy imports.
 # ---------------------------------------------------------------------------
-try:
-    _audio_mod = importlib.import_module(
-        "api.production_pipeline.0_Audio_Extraction_VoiceToText"
-    )
-    AudioExtractionPipeline = _audio_mod.AudioExtractionPipeline
-    AUDIO_EXTRACTION_AVAILABLE = True
-except (ImportError, AttributeError):
-    logger.warning("Audio extraction pipeline not available")
-    AUDIO_EXTRACTION_AVAILABLE = False
+_audio_mod = None
+AudioExtractionPipeline = None
+AUDIO_EXTRACTION_AVAILABLE = False
+
+
+def _ensure_audio_loaded() -> None:
+    global _audio_mod, AudioExtractionPipeline, AUDIO_EXTRACTION_AVAILABLE
+    if _audio_mod is not None:
+        return
+    try:
+        _audio_mod = importlib.import_module(
+            "api.production_pipeline.0_Audio_Extraction_VoiceToText"
+        )
+        AudioExtractionPipeline = _audio_mod.AudioExtractionPipeline
+        AUDIO_EXTRACTION_AVAILABLE = True
+        logger.info("Audio extraction pipeline loaded (lazy)")
+    except (ImportError, AttributeError) as e:
+        logger.warning("Audio extraction pipeline not available: %s", e)
+        AUDIO_EXTRACTION_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Real model inference (optional, needs checkpoint)
@@ -172,17 +183,7 @@ class PipelineRunner:
         self.claim_id = None
         self.pipeline_stages = {}
         self.execution_log = []
-
-        # Initialize audio extraction if available
-        if AUDIO_EXTRACTION_AVAILABLE:
-            try:
-                self.audio_extractor = AudioExtractionPipeline(model_size="base")
-                logger.info("Audio extraction pipeline initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize audio extraction: {e}")
-                self.audio_extractor = None
-        else:
-            self.audio_extractor = None
+        self.audio_extractor = None  # Set on first use in _stage_0_audio_extraction (lazy)
 
     async def run(
         self,
@@ -212,6 +213,8 @@ class PipelineRunner:
         logger.info(f"Starting pipeline: {self.request_id}")
 
         from_media = False
+        fast_web_mode = bool(kwargs.get("fast_web_mode"))
+        skip_summary = bool(kwargs.get("skip_summary"))
 
         # ---- Stage 0: Audio Extraction ----
         if media_source and media_type:
@@ -279,6 +282,8 @@ class PipelineRunner:
                 step3_out = _process_step2_output(step2_out)
             else:
                 step3_out = self._fallback_stage_3(step2_out)
+            if fast_web_mode:
+                step3_out = self._apply_fast_web_profile(step3_out)
             self.pipeline_stages["3_routing_policy"] = step3_out
             self._log_stage("3_routing_policy", step3_out)
         except Exception as e:
@@ -296,8 +301,9 @@ class PipelineRunner:
                 ("6_mmr_selection",        _process_step5_output),
                 ("7_light_relevance_gate", _process_step6_output),
                 ("8_explainability_shap",  _process_step7_output),
-                ("9_llm_summarization",    _process_step8_output),
             ]
+            if not skip_summary:
+                async_stages.append(("9_llm_summarization", _process_step8_output))
             for stage_name, stage_fn in async_stages:
                 if stage_fn is None:
                     logger.info("Stage %s: module not loaded, skipping", stage_name)
@@ -324,8 +330,16 @@ class PipelineRunner:
     def _stage_0_audio_extraction(
         self, media_source: str, media_type: str, language: Optional[str] = None
     ) -> Dict[str, Any]:
-        if not self.audio_extractor:
+        _ensure_audio_loaded()
+        if not AUDIO_EXTRACTION_AVAILABLE or not AudioExtractionPipeline:
             raise RuntimeError("Audio extraction not available")
+        if self.audio_extractor is None:
+            try:
+                self.audio_extractor = AudioExtractionPipeline(model_size="base")
+                logger.info("Audio extraction pipeline initialized")
+            except Exception as e:
+                logger.error("Failed to initialize audio extraction: %s", e)
+                raise RuntimeError("Audio extraction not available") from e
         result = self.audio_extractor.process(
             request_id=self.request_id,
             claim_id=self.claim_id,
@@ -412,6 +426,24 @@ class PipelineRunner:
             **step2_out,
             "routing_decision": routing_decision,
         }
+
+    def _apply_fast_web_profile(self, step3_out: Dict[str, Any]) -> Dict[str, Any]:
+        """Trim query expansion and retrieval sizes for fast text-only web checks."""
+        out = dict(step3_out)
+        routing = dict(out.get("routing") or {})
+        rag = dict(routing.get("rag") or {})
+        rag.update(
+            {
+                "use_query_expansion": False,
+                "query_variants": 0,
+                "candidate_pool_size_m": min(int(rag.get("candidate_pool_size_m") or 100), 12),
+                "mmr_top_n": min(int(rag.get("mmr_top_n") or 12), 6),
+                "final_top_k": min(int(rag.get("final_top_k") or 6), 3),
+            }
+        )
+        routing["rag"] = rag
+        out["routing"] = routing
+        return out
 
     # ------------------------------------------------------------------
     # Result building

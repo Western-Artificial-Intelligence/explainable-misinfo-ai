@@ -22,6 +22,56 @@ export interface AnalysisResult {
   rawResult: Record<string, unknown>;
 }
 
+interface Citation {
+  title?: string;
+  url?: string;
+}
+
+interface LegacyAnalysisPayload {
+  prediction?: string;
+  label?: string;
+  confidence?: number;
+  explanation?: string;
+  detail?: string;
+  sources?: Citation[];
+}
+
+interface ProductionSummary {
+  intro?: string;
+  body1?: string;
+  body2?: string;
+  conclusion?: string;
+  verdict?: string;
+  confidence?: number;
+  citations?: Citation[];
+}
+
+interface ProductionAnalysisPayload {
+  final_prediction?: string;
+  confidence?: number;
+  summary?: ProductionSummary;
+  roberta?: {
+    confidence?: number;
+    label?: {
+      class_name?: string;
+    };
+  };
+  last_stage_output?: {
+    summary?: ProductionSummary;
+    roberta?: {
+      confidence?: number;
+      label?: {
+        class_name?: string;
+      };
+    };
+  };
+  meta?: {
+    warnings?: Array<{
+      message?: string;
+    }>;
+  };
+}
+
 // ── Model definitions ──────────────────────────────────────────────────────
 export const MODELS: { id: ModelId; label: string; shortLabel: string; desc: string; badge: string; badgeColor: string }[] = [
   {
@@ -95,6 +145,15 @@ async function getErrorMessage(response: Response): Promise<string> {
     if (typeof parsed?.detail === "string") {
       return parsed.detail;
     }
+    if (typeof parsed?.detail?.message === "string") {
+      return parsed.detail.message;
+    }
+    if (typeof parsed?.message === "string") {
+      return parsed.message;
+    }
+    if (typeof parsed?.error === "string") {
+      return parsed.error;
+    }
     return text || `Request failed with status ${response.status}`;
   } catch {
     return `Request failed with status ${response.status}`;
@@ -132,26 +191,33 @@ function extractDetectedClaims(payload: any): string[] {
 }
 
 function extractSupportingEvidence(payload: any): Array<{ title: string; url: string; snippet: string }> {
-  const summaryCitations = Array.isArray(payload?.summary?.citations) ? payload.summary.citations : [];
+  const summary = payload?.summary ?? payload?.last_stage_output?.summary;
+  const summaryCitations = Array.isArray(summary?.citations) ? summary.citations : [];
   if (summaryCitations.length > 0) {
     return summaryCitations
       .map((citation: any) => ({
         title: String(citation?.title || citation?.source || "Evidence source"),
-        url: String(citation?.url || ""),
-        snippet: String(citation?.snippet || ""),
+        url: String(citation?.url ?? ""),
+        snippet: String(citation?.snippet ?? ""),
       }))
-      .slice(0, 5);
+      .filter((c: { url: string }) => c.url || c.title)
+      .slice(0, 8);
   }
 
-  const topItems = Array.isArray(payload?.evidence_topk?.items) ? payload.evidence_topk.items : [];
+  const evidenceTopk = payload?.evidence_topk ?? payload?.last_stage_output?.evidence_topk;
+  const topItems = Array.isArray(evidenceTopk?.items) ? evidenceTopk.items : [];
   return topItems
-    .map((item: any) => ({
-      title: String(item?.doc?.title || item?.doc?.source || "Evidence source"),
-      url: String(item?.doc?.url || ""),
-      snippet: String(item?.text || ""),
-    }))
-    .filter((item: { title: string; url: string; snippet: string }) => item.snippet || item.title || item.url)
-    .slice(0, 5);
+    .map((item: any) => {
+      const doc = item?.doc ?? {};
+      const url = doc.url ?? (typeof doc.source === "string" && doc.source.startsWith("http") ? doc.source : "");
+      return {
+        title: String(doc?.title || doc?.source || "Evidence source"),
+        url: String(url),
+        snippet: String(item?.text ?? ""),
+      };
+    })
+    .filter((item: { title: string; url: string; snippet: string }) => item.title || item.url || item.snippet)
+    .slice(0, 8);
 }
 
 async function analyzeWithBackend(
