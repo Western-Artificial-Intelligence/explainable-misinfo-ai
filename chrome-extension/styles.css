@@ -168,6 +168,26 @@
   white-space: nowrap;
 }
 
+.tlx-verdict-label.tlx-verdict-true {
+  color: #059669;
+  font-weight: 600;
+}
+
+.tlx-verdict-label.tlx-verdict-false {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.tlx-verdict-label.tlx-verdict-mixed {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.tlx-verdict-pct {
+  color: #374151;
+  font-weight: 600;
+}
+
 .tlx-live-log-content {
   margin: 8px 0 0;
   padding: 8px;

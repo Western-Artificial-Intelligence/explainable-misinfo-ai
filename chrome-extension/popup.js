@@ -981,7 +981,7 @@ function showLiveLogPanel(leftText, rightText, logText, expanded) {
   if (!liveLogPanel || !liveLogHeaderLeft || !liveLogHeaderRight || !liveLogContent) return;
   liveLogPanel.classList.remove("tlx-hidden");
   liveLogHeaderLeft.textContent = leftText || "";
-  liveLogHeaderRight.textContent = rightText || "";
+  liveLogHeaderRight.innerHTML = rightText || "";
   liveLogContent.textContent = logText || "";
   liveLogExpanded = Boolean(expanded);
   liveLogContent.classList.toggle("tlx-hidden", !liveLogExpanded);
@@ -997,10 +997,14 @@ function updateLiveLogPanelFromResult(data) {
   if (!data || typeof data !== "object") return;
   const roberta = data.roberta || {};
   const label = roberta.label || {};
-  const className = String(label.class_name || label.label || "").trim();
+  const rawClass = String(label.class_name || label.label || "").trim().toLowerCase();
+  const verdictClass = rawClass === "true" || rawClass === "false" || rawClass === "mixed" ? rawClass : "mixed";
+  const displayLabel = verdictClass === "true" ? "True" : verdictClass === "false" ? "False" : "Mixed";
   const conf = Number(roberta.confidence);
   const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
-  const right = className ? `${className} (${confPct})` : "";
+  const right = displayLabel && confPct
+    ? `<span class="tlx-verdict-label tlx-verdict-${verdictClass}">${escapeHtml(displayLabel)}</span> <span class="tlx-verdict-pct">(${escapeHtml(confPct)})</span>`
+    : "";
   const logText = typeof data.backend_log === "string" ? data.backend_log : "";
   showLiveLogPanel("Evaluation complete", right, logText, false);
 }
