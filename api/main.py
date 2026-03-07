@@ -1,7 +1,14 @@
 # Import FastAPI framework
 import os  # noqa: F401
+import warnings
 from pathlib import Path
 import logging
+
+# Suppress NumPy MINGW-W64 warnings on Windows (experimental float128 path).
+# To fix properly: use a NumPy wheel built with MSVC, e.g.:
+#   pip install --force-reinstall --only-binary :all: "numpy>=1.24,<2"
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="numpy.core.getlimits")
+warnings.filterwarnings("ignore", message=".*MINGW-W64.*")
 
 logger = logging.getLogger(__name__)
 

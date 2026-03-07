@@ -507,7 +507,7 @@ def _build_fallback_summary(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _merge_runner_result(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Expose final-stage summary fields at the top level for frontend clients."""
+    """Expose final-stage summary, roberta, and evidence_topk at the top level for frontend clients."""
     merged = dict(result)
     last_stage_output = result.get("last_stage_output")
     if isinstance(last_stage_output, dict):
@@ -515,6 +515,8 @@ def _merge_runner_result(result: Dict[str, Any]) -> Dict[str, Any]:
             merged["summary"] = last_stage_output["summary"]
         if "roberta" not in merged and isinstance(last_stage_output.get("roberta"), dict):
             merged["roberta"] = last_stage_output["roberta"]
+        if "evidence_topk" not in merged and isinstance(last_stage_output.get("evidence_topk"), dict):
+            merged["evidence_topk"] = last_stage_output["evidence_topk"]
     if "summary" not in merged:
         fallback_summary = _build_fallback_summary(merged)
         if fallback_summary is not None:

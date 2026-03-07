@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from ..production_pipeline.pipeline_runner import PipelineRunner
 from ..production_pipeline.middlewares.llm_blackbox import LLMBlackbox
 from ..utils.analysis_store import add_analysis_record
+from .pipeline import _merge_runner_result
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -82,115 +83,95 @@ def _load_module(name: str, path: Path):
 _API_ROOT = Path(__file__).resolve().parents[1]
 _PIPELINE = _API_ROOT / "production_pipeline"
 
+# Lazy-loaded step refs (set by _ensure_steps_loaded); avoid loading at import so server starts fast.
+process_user_claim = None
+process_step1_output = None
+process_step2_output = None
+process_step3_output = None
+process_step4_output = None
+process_step5_output = None
+process_step6_output = None
+process_step7_output = None
+process_step8_output = None
+IngestClaimError = Exception
+RobertaInferenceError = Exception
+RoutingPolicyError = Exception
+QueryBuildingError = Exception
+RAGRetrievalError = Exception
+MMRSelectionError = Exception
+LightRelevanceGateError = Exception
+ExplainabilitySHAPError = Exception
 
-# ----------------------------
-# Load Step 1
-# ----------------------------
-_step1 = _load_module(
-    "step1_ingest_claim",
-    _PIPELINE / "1_Ingest_claim" / "1_ingest_claim.py",
-)
-process_user_claim = _step1.process_user_claim
-IngestClaimError = getattr(_step1, "IngestClaimError", Exception)
-
-
-# ----------------------------
-# Load Step 2
-# ----------------------------
-_step2 = _load_module(
-    "step2_roberta_inference",
-    _PIPELINE / "2_RoBERTa_inference" / "2_RoBERTa_inference.py",
-)
-process_step1_output = _step2.process_step1_output
-RobertaInferenceError = getattr(_step2, "RobertaInferenceError", Exception)
-
-
-# ----------------------------
-# Load Step 3
-# ----------------------------
-_step3 = _load_module(
-    "step3_routing_policy",
-    _PIPELINE / "3_Routing_policy" / "3_routing_policy.py",
-)
-process_step2_output = _step3.process_step2_output
-RoutingPolicyError = getattr(_step3, "RoutingPolicyError", Exception)
-
-
-# ----------------------------
-# Load Step 4
-# ----------------------------
-_step4 = _load_module(
-    "step4_query_building",
-    _PIPELINE / "4_Query_Building" / "4_query_building.py",
-)
-process_step3_output = _step4.process_step3_output
-QueryBuildingError = getattr(_step4, "QueryBuildingError", Exception)
-
-
-# ----------------------------
-# Load Step 5
-# ----------------------------
-_step5 = _load_module(
-    "step5_rag_retrieval",
-    _PIPELINE / "5_RAG_retrieval" / "5_rag_retrieval.py",
-)
-process_step4_output = _step5.process_step4_output
-RAGRetrievalError = getattr(_step5, "RAGRetrievalError", Exception)
-
-
-# ----------------------------
-# Load Step 6
-# ----------------------------
-_step6 = _load_module(
-    "step6_mmr_selection",
-    _PIPELINE / "6_MMR_selection" / "6_mmr_selection.py",
-)
-process_step5_output = _step6.process_step5_output
-MMRSelectionError = getattr(_step6, "MMRSelectionError", Exception)
-
-
-# ----------------------------
-# Load Step 7
-# ----------------------------
-_step7 = _load_module(
-    "step7_light_relevance_gate",
-    _PIPELINE / "7_Light_relevance_gate" / "7_light_relevance_gate.py",
-)
-process_step6_output = _step7.process_step6_output
-LightRelevanceGateError = getattr(_step7, "LightRelevanceGateError", Exception)
-
-
-# ----------------------------
-# Load Step 8
-# ----------------------------
-_step8 = _load_module(
-    "step8_explainability_shap",
-    _PIPELINE / "8_Explainability_SHAP" / "8_explainability_shap.py",
-)
-process_step7_output = _step8.process_step7_output
-ExplainabilitySHAPError = getattr(_step8, "ExplainabilitySHAPError", Exception)
-
-
-# ----------------------------
-# Load Step 9 (optional)
-# ----------------------------
 class _LLMSummarizationErrorPlaceholder(Exception):
     """Placeholder when step 9 is not loaded; never raised."""
 
 LLMSummarizationError = _LLMSummarizationErrorPlaceholder
-_step9_path = _PIPELINE / "9_LLM_summarization" / "9_llm_summarization.py"
-if _step9_path.exists():
-    try:
-        _step9 = _load_module("step9_llm_summarization", _step9_path)
-        process_step8_output = _step9.process_step8_output
-        LLMSummarizationError = getattr(_step9, "LLMSummarizationError", _LLMSummarizationErrorPlaceholder)
-        _STEP9_AVAILABLE = True
-    except Exception:
-        process_step8_output = None
-        _STEP9_AVAILABLE = False
-else:
-    process_step8_output = None
-    _STEP9_AVAILABLE = False
+_STEP9_AVAILABLE = False
+_STEPS_LOADED = False
+_steps_load_lock = threading.Lock()
+
+
+def _ensure_steps_loaded() -> None:
+    """Load pipeline step modules on first use so server startup is not blocked."""
+    global _STEPS_LOADED
+    if _STEPS_LOADED:
+        return
+    with _steps_load_lock:
+        if _STEPS_LOADED:
+            return
+        global process_user_claim, process_step1_output, process_step2_output
+        global process_step3_output, process_step4_output, process_step5_output
+        global process_step6_output, process_step7_output, process_step8_output
+        global IngestClaimError, RobertaInferenceError, RoutingPolicyError, QueryBuildingError
+        global RAGRetrievalError, MMRSelectionError, LightRelevanceGateError, ExplainabilitySHAPError
+        global LLMSummarizationError, _STEP9_AVAILABLE
+
+        _step1 = _load_module("step1_ingest_claim", _PIPELINE / "1_Ingest_claim" / "1_ingest_claim.py")
+        process_user_claim = _step1.process_user_claim
+        IngestClaimError = getattr(_step1, "IngestClaimError", Exception)
+
+        _step2 = _load_module("step2_roberta_inference", _PIPELINE / "2_RoBERTa_inference" / "2_RoBERTa_inference.py")
+        process_step1_output = _step2.process_step1_output
+        RobertaInferenceError = getattr(_step2, "RobertaInferenceError", Exception)
+
+        _step3 = _load_module("step3_routing_policy", _PIPELINE / "3_Routing_policy" / "3_routing_policy.py")
+        process_step2_output = _step3.process_step2_output
+        RoutingPolicyError = getattr(_step3, "RoutingPolicyError", Exception)
+
+        _step4 = _load_module("step4_query_building", _PIPELINE / "4_Query_Building" / "4_query_building.py")
+        process_step3_output = _step4.process_step3_output
+        QueryBuildingError = getattr(_step4, "QueryBuildingError", Exception)
+
+        _step5 = _load_module("step5_rag_retrieval", _PIPELINE / "5_RAG_retrieval" / "5_rag_retrieval.py")
+        process_step4_output = _step5.process_step4_output
+        RAGRetrievalError = getattr(_step5, "RAGRetrievalError", Exception)
+
+        _step6 = _load_module("step6_mmr_selection", _PIPELINE / "6_MMR_selection" / "6_mmr_selection.py")
+        process_step5_output = _step6.process_step5_output
+        MMRSelectionError = getattr(_step6, "MMRSelectionError", Exception)
+
+        _step7 = _load_module("step7_light_relevance_gate", _PIPELINE / "7_Light_relevance_gate" / "7_light_relevance_gate.py")
+        process_step6_output = _step7.process_step6_output
+        LightRelevanceGateError = getattr(_step7, "LightRelevanceGateError", Exception)
+
+        _step8 = _load_module("step8_explainability_shap", _PIPELINE / "8_Explainability_SHAP" / "8_explainability_shap.py")
+        process_step7_output = _step8.process_step7_output
+        ExplainabilitySHAPError = getattr(_step8, "ExplainabilitySHAPError", Exception)
+
+        _step9_path = _PIPELINE / "9_LLM_summarization" / "9_llm_summarization.py"
+        if _step9_path.exists():
+            try:
+                _step9 = _load_module("step9_llm_summarization", _step9_path)
+                process_step8_output = _step9.process_step8_output
+                LLMSummarizationError = getattr(_step9, "LLMSummarizationError", _LLMSummarizationErrorPlaceholder)
+                _STEP9_AVAILABLE = True
+            except Exception:
+                process_step8_output = None
+        else:
+            process_step8_output = None
+
+        _STEPS_LOADED = True
+        logger.info("Production pipeline steps loaded (lazy)")
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -276,6 +257,7 @@ async def _persist_analysis_if_requested(meta: dict, out: object, user_claim: st
 
 @router.post("/process")
 async def process(request: Request):
+    _ensure_steps_loaded()
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(
@@ -284,6 +266,7 @@ async def process(request: Request):
         )
     user_claim = body.get("user_claim")
     metadata = body
+    request_id = body.get("request_id")
 
     if not isinstance(user_claim, str) or not user_claim.strip():
         raise HTTPException(
@@ -340,6 +323,7 @@ async def process(request: Request):
 
 async def _run_pipeline_async(user_claim: str):
     """Run the same pipeline as process(); used by streaming endpoint. Raises on error."""
+    _ensure_steps_loaded()
     step1_out = await run_in_threadpool(process_user_claim, user_claim)
     step2_out = await run_in_threadpool(process_step1_output, step1_out)
     step3_out = await run_in_threadpool(process_step2_output, step2_out)
@@ -429,6 +413,7 @@ async def _stream_process_generator(user_claim: str, metadata: dict):
 @router.post("/process-stream")
 async def process_stream(request: Request):
     """Stream backend log lines as SSE, then send final result. For real-time log in the extension."""
+    _ensure_steps_loaded()
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(
