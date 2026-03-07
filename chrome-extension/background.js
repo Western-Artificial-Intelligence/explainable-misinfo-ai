@@ -1,5 +1,4 @@
-const DEFAULT_API_BASE = "http://127.0.0.1:8011";
-const LEGACY_API_BASES = new Set(["http://localhost:8000", "http://127.0.0.1:8000"]);
+const DEFAULT_API_BASE = "http://localhost:8000";
 const MENU_ID_ANALYZE_SELECTION = "truthlens-analyze-selection";
 const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
 
@@ -327,8 +326,7 @@ async function analyzeBatch(items, tabId, defaultContext = {}) {
 async function getApiBase() {
   return new Promise((resolve) => {
     chrome.storage.sync.get({ backendUrl: DEFAULT_API_BASE }, (items) => {
-      const raw = String(items.backendUrl || DEFAULT_API_BASE).replace(/\/$/, "");
-      resolve(LEGACY_API_BASES.has(raw) ? DEFAULT_API_BASE : raw);
+      resolve(items.backendUrl.replace(/\/$/, ""));
     });
   });
 }
@@ -383,7 +381,7 @@ async function callAnalyze(text) {
 async function callProcess(userClaim, context = {}) {
   const cleanText = String(userClaim || "").trim();
   if (!cleanText) {
-    throw new Error("text cannot be empty.");
+    throw new Error("user_claim cannot be empty.");
   }
 
   const base = await getApiBase();
@@ -425,13 +423,26 @@ function normalizeProcessResponse(data) {
     || "Processed via full pipeline.";
 
   const citations = summary.citations || [];
-  const sources = Array.isArray(citations)
+  let sources = Array.isArray(citations)
     ? citations.map((c) => ({
         title: c?.title || c?.source || "",
         url: c?.url || "",
         snippet: c?.snippet || ""
       }))
     : [];
+  if (sources.length === 0) {
+    const evidenceTopk = data?.evidence_topk ?? data?.last_stage_output?.evidence_topk;
+    const items = Array.isArray(evidenceTopk?.items) ? evidenceTopk.items : [];
+    sources = items.slice(0, 8).map((item) => {
+      const doc = item?.doc ?? {};
+      const url = doc.url ?? (typeof doc.source === "string" && doc.source.startsWith("http") ? doc.source : "");
+      return {
+        title: doc?.title || doc?.source || "",
+        url: url || "",
+        snippet: item?.text || ""
+      };
+    }).filter((s) => s.title || s.url || s.snippet);
+  }
 
   const intro = (summary.intro || "").trim();
   const body1 = (summary.body1 || "").trim();

@@ -755,9 +755,8 @@ async function sendAudioForTranscription(audioBlob) {
  */
 async function getBackendUrl() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8011' }, (items) => {
-      const raw = String(items.backendUrl || 'http://127.0.0.1:8011').replace(/\/$/, '');
-      resolve((raw === 'http://localhost:8000' || raw === 'http://127.0.0.1:8000') ? 'http://127.0.0.1:8011' : raw);
+    chrome.storage.sync.get({ backendUrl: 'http://127.0.0.1:8000' }, (items) => {
+      resolve(items.backendUrl);
     });
   });
 }
