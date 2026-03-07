@@ -4,4 +4,4 @@
   publish = "build"
 
 [build.environment]
-  VITE_API_BASE_URL = "https://api.truthlens.app"
+  VITE_API_BASE_URL = "https://explainable-misinfo-ai.onrender.com"
