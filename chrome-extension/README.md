@@ -18,11 +18,25 @@ chrome-extension/
 ├── manifest.json
 ├── background.js
 ├── content.js
+├── audio-capture.js      # Realtime tab-audio capture + transcript merge/dedupe
+├── capture-worklet.js    # AudioWorklet processor (16 kHz mono PCM)
 ├── popup.html
 ├── popup.js
 ├── styles.css
 └── README.md
 ```
+
+## Realtime transcript – tech stack
+
+- **Capture:** Web Audio API (content script); `createMediaElementSource` / `createMediaStreamSource(captureStream())`; AudioWorklet or ScriptProcessorNode → 16 kHz mono Int16 PCM; rolling buffer, WAV chunks every ~2 s → `POST /api/audio/transcribe-file`.
+- **Backend:** Whisper (openai-whisper, base) for each chunk; returns `full_text` (and segments).
+- **Dedupe / merge (no external libs):** Implemented in `audio-capture.js` only, vanilla JavaScript. **No embeddings, no cosine similarity** — overlap is found with token alignment and one set-based similarity.
+  - **Tokenization:** `normalizeText` (collapse whitespace, trim) → split on spaces; each word normalized to a **key**: lowercase, strip non‑alphanumeric (`[^a-z0-9]+` removed) for matching; **raw** form kept for display.
+  - **Context:** Last 120 words of current transcript (`tailWords(emittedText, 120)`) passed as previous context for each new chunk.
+  - **Overlap detection (main):** **Suffix-of-prev vs prefix-of-next** — position-by-position token comparison (no vectors). Try overlap lengths `k` from `min(60, prevLen, nextLen)` down to 4; allow up to 15% token mismatches (`mismatchBudget = floor(k * 0.15)`) to handle ASR rephrasing; first valid `k` → **delta** = tokens after the overlap (drop one more if duplicate boundary token); delta length capped at 30 tokens.
+  - **Fallbacks:** (1) If normalized `next` is substring of `prev` → emit nothing. (2) Anchor: find prefix of `next` (5–10 tokens) in `prev`, emit remainder. (3) **Jaccard similarity** (set overlap: |A∩B|/|A∪B|) on last 16 tokens of next vs last 40 of prev — if > 0.7, suppress (treat as repeat). This is the only similarity metric used; no cosine.
+  - **Merge:** `mergeTranscript(prev, delta)` = `normalize(prev) + " " + normalize(delta)`; result length capped at `TLX_LIVE_MAX_CHARS` (keep trailing).
+  - **State:** `TLX_LIVE_STATE.emittedText` (cumulative), `lastWindowText`; persisted per tab in `chrome.storage.local` under `tlx_live_${url}`.
 
 ## What It Does
 
