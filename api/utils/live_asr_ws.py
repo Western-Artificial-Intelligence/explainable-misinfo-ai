@@ -46,10 +46,16 @@ def _build_live_transcribe_handler(path: str, register_fn):
     """
     from fastapi import WebSocket, WebSocketDisconnect
 
+    logger.info("[live_asr_ws] Registering WebSocket handler at path: %s", path)
+
     @register_fn(path)
     async def live_transcribe(websocket: WebSocket):
+        logger.info("[live_asr_ws] WebSocket connection attempt from %s | headers: %s",
+                    websocket.client, dict(websocket.headers))
         await websocket.accept()
+        logger.info("[live_asr_ws] WebSocket accepted")
         model = _get_model()
+        logger.info("[live_asr_ws] Model loaded: %s", model)
         if model is None:
             try:
                 await websocket.send_json({
@@ -95,7 +101,6 @@ def _build_live_transcribe_handler(path: str, register_fn):
 
         async def sender():
             nonlocal last_confirmed, last_partial_text, stable_count, buffer
-            loop = asyncio.get_event_loop()
             while True:
                 await asyncio.sleep(decode_interval)
                 if not buffer or len(buffer) < int(SAMPLE_RATE * 0.5):
@@ -109,6 +114,7 @@ def _build_live_transcribe_handler(path: str, register_fn):
                             vad_parameters=dict(min_silence_duration_ms=300),
                         )
                         return " ".join(s.text for s in segs).strip()
+                    loop = asyncio.get_running_loop()
                     text = await loop.run_in_executor(None, _run)
                     if text != last_partial_text:
                         last_partial_text = text
@@ -146,8 +152,5 @@ def register_live_transcribe_ws(router):
 
 
 def register_live_transcribe_app(app):
-    """Register WebSocket route /api/audio/live-transcribe directly on the FastAPI app.
-
-    This bypasses any router-level quirks that can cause 403 during WebSocket handshake.
-    """
-    _build_live_transcribe_handler("/api/audio/live-transcribe", app.websocket)
+    """Register WebSocket route /api/live-asr directly on the FastAPI app."""
+    _build_live_transcribe_handler("/api/live-asr", app.websocket)

@@ -29,5 +29,8 @@ streamlit>=1.28.0
 
 
 
+# Live ASR streaming
+faster-whisper>=1.0.0
+
 # Optional heavy dependencies (audio/image/explainability) are in:
 # requirements-optional.txt

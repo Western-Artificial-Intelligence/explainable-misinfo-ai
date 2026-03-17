@@ -48,8 +48,7 @@ let livePaused = false; // legacy; kept for minimal diff
 let liveWordTimerId = null;
 let liveWordQueue = [];
 let liveLastRenderedWordKey = "";
-const LIVE_WORD_INTERVAL_MS = 55;
-const LIVE_MAX_CHARS = 500;
+const LIVE_CHUNK_INTERVAL_MS = 2000; // must match TLX_LIVE_STATE.chunkIntervalMs in audio-capture.js
 const STORAGE_KEY_LIVE_EVALUATE_RESULT = "truthlens_live_evaluate_result";
 const STORAGE_KEY_LIVE_EVALUATING = "truthlens_live_evaluating";
 const STORAGE_KEY_EVALUATE_STARTED_AT = "truthlens_live_evaluate_started_at";
@@ -77,7 +76,7 @@ function getLastWordKeyFromText(text) {
 
 function stopLiveWordAnimation() {
   if (liveWordTimerId) {
-    clearInterval(liveWordTimerId);
+    clearTimeout(liveWordTimerId);
     liveWordTimerId = null;
   }
   liveWordQueue = [];
@@ -97,24 +96,23 @@ function appendLiveWord(word) {
     liveTranscriptText.textContent += " ";
   }
   liveTranscriptText.textContent += raw;
-  // Enforce max length by trimming from the start (oldest characters).
-  while (liveTranscriptText.textContent.length > LIVE_MAX_CHARS) {
-    liveTranscriptText.textContent = liveTranscriptText.textContent.slice(1);
-  }
   liveTranscriptText.scrollTop = liveTranscriptText.scrollHeight;
   if (key) liveLastRenderedWordKey = key;
 }
 
+function scheduleNextWord() {
+  if (!liveWordQueue.length) {
+    liveWordTimerId = null;
+    return;
+  }
+  const item = liveWordQueue.shift();
+  appendLiveWord(item.word);
+  liveWordTimerId = setTimeout(scheduleNextWord, item.intervalMs);
+}
+
 function kickLiveWordAnimation() {
   if (liveWordTimerId) return;
-  liveWordTimerId = setInterval(() => {
-    if (!liveWordQueue.length) {
-      stopLiveWordAnimation();
-      return;
-    }
-    const next = liveWordQueue.shift();
-    appendLiveWord(next);
-  }, LIVE_WORD_INTERVAL_MS);
+  scheduleNextWord();
 }
 
 function enqueueLiveTranscriptWords(text) {
@@ -122,7 +120,10 @@ function enqueueLiveTranscriptWords(text) {
   if (!trimmed) return;
   const words = trimmed.split(/\s+/g).filter(Boolean);
   if (!words.length) return;
-  liveWordQueue.push(...words);
+  // Spread words evenly across the chunk window so display fills the gap
+  // between chunks instead of dumping all words at once then going silent.
+  const intervalMs = Math.max(80, Math.floor(LIVE_CHUNK_INTERVAL_MS / words.length));
+  liveWordQueue.push(...words.map(w => ({ word: w, intervalMs })));
   kickLiveWordAnimation();
 }
 
@@ -1190,73 +1191,75 @@ async function onLiveEvaluate() {
   }
 }
 
-function extractEssaySections(result) {
-  if (!result || typeof result !== "object") return null;
-  const essay =
-    result.essay ||
-    result.llm_summary ||
-    result.summary_essay ||
-    null;
-  if (essay && typeof essay === "object") {
-    const intro = String(essay.intro || "").trim();
-    const body1 = String(essay.body1 || "").trim();
-    const body2 = String(essay.body2 || "").trim();
-    const conclusion = String(essay.conclusion || "").trim();
-    if (intro || body1 || body2 || conclusion) {
-      return { intro, body1, body2, conclusion };
-    }
+/**
+ * Extract unique words from the top positive SHAP segments.
+ * Returns lowercase word strings (length > 3) to use for bolding.
+ */
+function getShapPositiveWords(shap) {
+  if (!shap) return [];
+  const segments = Array.isArray(shap.segments) ? shap.segments : [];
+  const posIndices = Array.isArray(shap.top_segments?.positive) ? shap.top_segments.positive : [];
+  const words = new Set();
+  // Take top 3 positive segments that actually have value > 0
+  let taken = 0;
+  for (const i of posIndices) {
+    if (taken >= 3) break;
+    const seg = segments[i];
+    if (!seg || seg.value <= 0) continue;
+    seg.text.split(/\s+/)
+      .map(w => w.replace(/[^a-zA-Z0-9']/g, "").toLowerCase())
+      .filter(w => w.length > 3)
+      .forEach(w => words.add(w));
+    taken++;
   }
-  // Fallback: build a minimal explanation from roberta label and evidence_topk, if available.
-  const roberta = result.roberta || {};
-  const label = roberta.label || {};
-  const className = String(label.class_name || label.label || "").trim();
-  const conf = Number(roberta.confidence);
-  const confPct = Number.isFinite(conf) ? `${Math.round(conf * 100)}%` : "";
-  const status = className ? `The claim is classified as ${className}${confPct ? ` with confidence ${confPct}.` : "."}` : "";
-  const evidenceItems = (result.evidence_topk && Array.isArray(result.evidence_topk.items)) ? result.evidence_topk.items : [];
-  const topEvidence = evidenceItems.slice(0, 3).map((item) => {
-    const src = item.doc?.source || "";
-    const title = item.doc?.title || "";
-    return `• ${title}${src ? ` (${src})` : ""}`;
+  return Array.from(words);
+}
+
+/**
+ * Strip HTML tags from a string.
+ */
+function stripHtml(html) {
+  return String(html || "").replace(/<[^>]+>/g, "");
+}
+
+/**
+ * Wrap SHAP-positive words in <strong> within an already-escaped HTML string.
+ */
+function boldShapWords(escapedHtml, shapWords) {
+  if (!shapWords.length) return escapedHtml;
+  let result = escapedHtml;
+  shapWords.forEach(word => {
+    const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    try {
+      result = result.replace(new RegExp(`\\b(${esc})\\b`, "gi"), "<strong>$1</strong>");
+    } catch (_) {}
   });
-  const intro = status || "";
-  const body1 = topEvidence.length ? `Key evidence:\n${topEvidence.join("\n")}` : "";
-  return { intro, body1, body2: "", conclusion: "" };
+  return result;
 }
 
 function renderLiveEssay(result) {
   if (!liveEssayContainer || !liveEssayContent) return;
-  const sections = extractEssaySections(result);
-  const hasSections = sections && (sections.body1 || sections.body2 || sections.conclusion);
-  const sources = Array.isArray(result?.sources) ? result.sources : [];
-  const refs = sources.slice(0, 2);
-  if (!hasSections && refs.length === 0) {
+
+  const items = Array.isArray(result?.evidence_topk?.items) ? result.evidence_topk.items : [];
+  const shap = result?.shap_explainability || null;
+
+  if (!items.length) {
     liveEssayContainer.classList.add("tlx-hidden");
     liveEssayContent.innerHTML = "";
     return;
   }
 
-  const parts = [];
-  if (sections?.body1) {
-    parts.push(
-      `<div class="tlx-live-essay-section"><h3>Body 1</h3><p>${escapeHtml(sections.body1)}</p></div>`
-    );
-  }
-  if (sections?.body2) {
-    parts.push(
-      `<div class="tlx-live-essay-section"><h3>Body 2</h3><p>${escapeHtml(sections.body2)}</p></div>`
-    );
-  }
-  if (sections?.conclusion) {
-    parts.push(
-      `<div class="tlx-live-essay-section"><h3>Conclusion</h3><p>${escapeHtml(sections.conclusion)}</p></div>`
-    );
-  }
-  if (refs.length > 0) {
-    parts.push(
-      `<div class="tlx-live-essay-section"><h3>References</h3><ul class="tlx-live-essay-refs">${refs.map((s) => `<li><a href="${escapeHtml(s.url || "#")}" target="_blank" rel="noopener">${escapeHtml(s.title || s.url || "Source")}</a></li>`).join("")}</ul></div>`
-    );
-  }
+  const shapWords = getShapPositiveWords(shap);
+  const parts = items.slice(0, 2).map(item => {
+    const quote = stripHtml(item.text || "").trim();
+    const boldedQuote = boldShapWords(escapeHtml(quote), shapWords);
+    const url = escapeHtml(item.doc?.url || "#");
+    const title = escapeHtml(item.doc?.title || item.doc?.source || "Source");
+    return `<div class="tlx-evidence-item">
+      <blockquote class="tlx-evidence-quote">${boldedQuote}</blockquote>
+      <a class="tlx-evidence-link" href="${url}" target="_blank" rel="noopener">${title}</a>
+    </div>`;
+  });
 
   liveEssayContent.innerHTML = parts.join("");
   liveEssayContainer.classList.remove("tlx-hidden");
