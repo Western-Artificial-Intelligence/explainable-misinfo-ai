@@ -80,7 +80,7 @@
 
 .tlx-panel-live .tlx-live-transcript-text {
   min-height: 60px;
-  max-height: 20vh;
+  max-height: 40vh;
   overflow-y: auto;
   padding: 10px;
   margin: 6px 0 10px;
@@ -202,32 +202,43 @@
   word-break: break-word;
 }
 
-.tlx-live-essay-section {
-  margin-bottom: 8px;
+.tlx-evidence-item {
+  margin-bottom: 10px;
 }
 
-.tlx-live-essay-section h3 {
-  margin: 0 0 2px;
+.tlx-evidence-item:last-child {
+  margin-bottom: 0;
+}
+
+.tlx-evidence-quote {
+  margin: 0 0 4px;
+  padding: 6px 10px;
+  border-left: 3px solid #6366f1;
+  background: #f1f5f9;
+  border-radius: 0 6px 6px 0;
   font-size: 12px;
-  font-weight: 600;
-  color: #111827;
+  line-height: 1.5;
+  color: #334155;
+  font-style: italic;
 }
 
-.tlx-live-essay-section p {
-  margin: 0;
+.tlx-evidence-quote strong {
+  font-style: normal;
+  color: #1e40af;
 }
 
-.tlx-live-essay-refs {
-  margin: 4px 0 0;
-  padding-left: 18px;
-}
-
-.tlx-live-essay-refs a {
+.tlx-evidence-link {
+  font-size: 11px;
   color: #2563eb;
   text-decoration: none;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.tlx-live-essay-refs a:hover {
+.tlx-evidence-link:hover {
   text-decoration: underline;
 }
 

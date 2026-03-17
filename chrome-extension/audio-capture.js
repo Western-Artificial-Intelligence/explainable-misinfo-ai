@@ -29,7 +29,6 @@ const TLX_LIVE_STATE = {
   lastConfirmed: "",
 };
 
-const TLX_LIVE_MAX_CHARS = 500;
 const EXTENSION_SESSION_STORAGE_KEY = "truthlens_extension_session_id";
 
 /**
@@ -93,10 +92,7 @@ function initAudioCapture() {
       return false;
     }
     if (message.type === "SET_LIVE_BASELINE") {
-      let baseline = normalizeText(message.payload?.text || "");
-      if (baseline.length > TLX_LIVE_MAX_CHARS) {
-        baseline = baseline.slice(-TLX_LIVE_MAX_CHARS);
-      }
+      const baseline = normalizeText(message.payload?.text || "");
       TLX_LIVE_STATE.emittedText = baseline;
       // Persist updated baseline so it survives reloads
       try {
@@ -264,8 +260,7 @@ async function startLiveTranscript(options = {}) {
       const word = String(msg.word || "").trim();
       if (!word) return;
 
-      let merged = mergeTranscript(TLX_LIVE_STATE.emittedText, word);
-      if (merged.length > TLX_LIVE_MAX_CHARS) merged = merged.slice(-TLX_LIVE_MAX_CHARS);
+      const merged = mergeTranscript(TLX_LIVE_STATE.emittedText, word);
       TLX_LIVE_STATE.emittedText = merged;
 
       try {
