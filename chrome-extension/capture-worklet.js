@@ -38,6 +38,13 @@ class CaptureWorkletProcessor extends AudioWorkletProcessor {
     if (!input || !input.length) return true;
     const ch = input[0];
     if (!ch || ch.length === 0) return true;
+
+    // Pass audio through so the user still hears the video
+    const output = outputs[0];
+    if (output && output[0]) {
+      output[0].set(ch);
+    }
+
     for (let i = 0; i < ch.length; i++) {
       inputBuffer.push(ch[i]);
     }

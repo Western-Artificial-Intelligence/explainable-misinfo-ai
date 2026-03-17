@@ -48,7 +48,7 @@ let livePaused = false; // legacy; kept for minimal diff
 let liveWordTimerId = null;
 let liveWordQueue = [];
 let liveLastRenderedWordKey = "";
-const LIVE_WORD_INTERVAL_MS = 55;
+const LIVE_CHUNK_INTERVAL_MS = 2000; // must match TLX_LIVE_STATE.chunkIntervalMs in audio-capture.js
 const LIVE_MAX_CHARS = 500;
 const STORAGE_KEY_LIVE_EVALUATE_RESULT = "truthlens_live_evaluate_result";
 const STORAGE_KEY_LIVE_EVALUATING = "truthlens_live_evaluating";
@@ -77,7 +77,7 @@ function getLastWordKeyFromText(text) {
 
 function stopLiveWordAnimation() {
   if (liveWordTimerId) {
-    clearInterval(liveWordTimerId);
+    clearTimeout(liveWordTimerId);
     liveWordTimerId = null;
   }
   liveWordQueue = [];
@@ -105,16 +105,19 @@ function appendLiveWord(word) {
   if (key) liveLastRenderedWordKey = key;
 }
 
+function scheduleNextWord() {
+  if (!liveWordQueue.length) {
+    liveWordTimerId = null;
+    return;
+  }
+  const item = liveWordQueue.shift();
+  appendLiveWord(item.word);
+  liveWordTimerId = setTimeout(scheduleNextWord, item.intervalMs);
+}
+
 function kickLiveWordAnimation() {
   if (liveWordTimerId) return;
-  liveWordTimerId = setInterval(() => {
-    if (!liveWordQueue.length) {
-      stopLiveWordAnimation();
-      return;
-    }
-    const next = liveWordQueue.shift();
-    appendLiveWord(next);
-  }, LIVE_WORD_INTERVAL_MS);
+  scheduleNextWord();
 }
 
 function enqueueLiveTranscriptWords(text) {
@@ -122,7 +125,10 @@ function enqueueLiveTranscriptWords(text) {
   if (!trimmed) return;
   const words = trimmed.split(/\s+/g).filter(Boolean);
   if (!words.length) return;
-  liveWordQueue.push(...words);
+  // Spread words evenly across the chunk window so display fills the gap
+  // between chunks instead of dumping all words at once then going silent.
+  const intervalMs = Math.max(80, Math.floor(LIVE_CHUNK_INTERVAL_MS / words.length));
+  liveWordQueue.push(...words.map(w => ({ word: w, intervalMs })));
   kickLiveWordAnimation();
 }
 

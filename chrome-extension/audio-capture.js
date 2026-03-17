@@ -22,16 +22,11 @@ const TLX_AUDIO_STATE = {
 
 const TLX_LIVE_STATE = {
   active: false,
-  chunkIntervalId: null,
-  chunkIntervalMs: 2000, // live transcript updates every 2 seconds
-  noAudioCount: 0,
-  // Keep a rolling audio window (more reliable than pure 2s chunks for Whisper)
-  rollingWindowSeconds: 8,
-  minWindowSeconds: 3,
-  rollingPcmChunks: [],
-  rollingSamples: 0,
+  ws: null,
+  workletNode: null,
+  useLiveWs: true,
   emittedText: "",
-  lastWindowText: ""
+  lastConfirmed: "",
 };
 
 const TLX_LIVE_MAX_CHARS = 500;
@@ -234,95 +229,83 @@ async function stopAudioCapture() {
 }
 
 /**
- * Live transcript: chunk-based only. Sends audio every TLX_LIVE_STATE.chunkIntervalMs.
+ * Live transcript: streams 16kHz PCM via WebSocket to /api/audio/live-transcribe
+ * and receives partial + confirmed transcript from faster-whisper.
  */
 async function startLiveTranscript(options = {}) {
   if (TLX_LIVE_STATE.active) return { message: "Live transcript already active" };
 
-  await startAudioCapture({ live: true });
-  TLX_LIVE_STATE.active = true;
-  TLX_LIVE_STATE.noAudioCount = 0;
-  TLX_LIVE_STATE.rollingPcmChunks = [];
-  TLX_LIVE_STATE.rollingSamples = 0;
   TLX_LIVE_STATE.emittedText = normalizeText(options?.initialText || "");
-  TLX_LIVE_STATE.lastWindowText = tailWords(TLX_LIVE_STATE.emittedText, 60);
 
-  TLX_LIVE_STATE.chunkIntervalId = setInterval(async () => {
-    if (!TLX_LIVE_STATE.active) return;
+  // Open WebSocket before capturing audio so the worklet has somewhere to send.
+  const backendUrl = await getBackendUrl();
+  const wsUrl = backendUrl.replace(/^http/, "ws") + "/api/live-asr";
+  const ws = new WebSocket(wsUrl);
 
-    if (!TLX_AUDIO_STATE.isCapturing) {
-      TLX_LIVE_STATE.noAudioCount += 1;
-      if (TLX_LIVE_STATE.noAudioCount === 2) {
-        chrome.runtime.sendMessage({
-          type: "LIVE_TRANSCRIPT_NO_AUDIO",
-          payload: {
-            hint: "No audio captured yet. On TikTok/YouTube, ensure the main video is playing (not paused), then try Stop and Start capture again."
-          }
-        }).catch(() => {});
-      }
-      return;
-    }
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = () => reject(new Error("Could not connect to live transcription server"));
+    setTimeout(() => reject(new Error("WebSocket connection timeout")), 5000);
+  });
 
-    TLX_LIVE_STATE.noAudioCount = 0;
+  TLX_LIVE_STATE.ws = ws;
+  TLX_LIVE_STATE.active = true;
 
-    // Move newly captured PCM into the rolling window
-    const newChunks = TLX_AUDIO_STATE.audioChunks.slice();
-    TLX_AUDIO_STATE.audioChunks = [];
-    if (newChunks.length === 0) {
-      TLX_LIVE_STATE.noAudioCount += 1;
-      if (TLX_LIVE_STATE.noAudioCount === 2) {
-        chrome.runtime.sendMessage({
-          type: "LIVE_TRANSCRIPT_NO_AUDIO",
-          payload: {
-            hint: "No audio captured yet. On TikTok/YouTube, ensure the main video is playing (not paused), then try Stop and Start capture again."
-          }
-        }).catch(() => {});
-      }
-      return;
-    }
-
-    for (const arr of newChunks) {
-      TLX_LIVE_STATE.rollingPcmChunks.push(arr);
-      TLX_LIVE_STATE.rollingSamples += arr.length;
-    }
-
-    // Trim old audio beyond rolling window
-    const sampleRate = TLX_AUDIO_STATE.sampleRate || 44100;
-    const maxSamples = Math.floor(sampleRate * TLX_LIVE_STATE.rollingWindowSeconds);
-    while (TLX_LIVE_STATE.rollingSamples > maxSamples && TLX_LIVE_STATE.rollingPcmChunks.length > 0) {
-      const dropped = TLX_LIVE_STATE.rollingPcmChunks.shift();
-      TLX_LIVE_STATE.rollingSamples -= dropped.length;
-    }
-
-    const minSamples = Math.floor(sampleRate * TLX_LIVE_STATE.minWindowSeconds);
-    if (TLX_LIVE_STATE.rollingSamples < minSamples) {
-      return;
-    }
-
-    const audioBlob = createWavBlob(TLX_LIVE_STATE.rollingPcmChunks);
-    if (audioBlob) {
-      try {
-        await sendLiveChunkForTranscription(audioBlob);
-      } catch (e) {
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.error) {
         chrome.runtime.sendMessage({
           type: "LIVE_TRANSCRIPT_ERROR",
-          payload: { error: e.message || "Chunk transcription failed" }
+          payload: { error: msg.error }
         }).catch(() => {});
+        return;
       }
-    }
-  }, TLX_LIVE_STATE.chunkIntervalMs);
+      const word = String(msg.word || "").trim();
+      if (!word) return;
 
+      let merged = mergeTranscript(TLX_LIVE_STATE.emittedText, word);
+      if (merged.length > TLX_LIVE_MAX_CHARS) merged = merged.slice(-TLX_LIVE_MAX_CHARS);
+      TLX_LIVE_STATE.emittedText = merged;
+
+      try {
+        const storageKey = `tlx_live_${location.href}`;
+        if (chrome?.storage?.local) {
+          chrome.storage.local.set({ [storageKey]: TLX_LIVE_STATE.emittedText });
+        }
+      } catch (e) {}
+
+      chrome.runtime.sendMessage({
+        type: "TRANSCRIPT_CHUNK",
+        payload: { text: word }
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
+  ws.onclose = () => {
+    if (TLX_LIVE_STATE.active) {
+      chrome.runtime.sendMessage({
+        type: "LIVE_TRANSCRIPT_ERROR",
+        payload: { error: "Live transcription connection closed unexpectedly." }
+      }).catch(() => {});
+    }
+  };
+
+  await startAudioCapture({ live: true });
   return { message: "Live transcript started" };
 }
 
 function pauseLiveTranscript() {
-  if (TLX_LIVE_STATE.chunkIntervalId) {
-    clearInterval(TLX_LIVE_STATE.chunkIntervalId);
-    TLX_LIVE_STATE.chunkIntervalId = null;
-  }
   TLX_LIVE_STATE.active = false;
-  TLX_LIVE_STATE.rollingPcmChunks = [];
-  TLX_LIVE_STATE.rollingSamples = 0;
+  if (TLX_LIVE_STATE.workletNode) {
+    TLX_LIVE_STATE.workletNode.disconnect();
+    TLX_LIVE_STATE.workletNode = null;
+  }
+  if (TLX_LIVE_STATE.ws) {
+    TLX_LIVE_STATE.ws.onclose = null; // suppress spurious error on intentional close
+    TLX_LIVE_STATE.ws.close();
+    TLX_LIVE_STATE.ws = null;
+  }
   stopCaptureOnly();
 }
 
@@ -330,70 +313,6 @@ function stopLiveTranscript() {
   pauseLiveTranscript();
 }
 
-/**
- * Send a single audio chunk for transcription and broadcast TRANSCRIPT_CHUNK (no TRANSCRIPTION_COMPLETE)
- */
-async function sendLiveChunkForTranscription(audioBlob) {
-  const backendUrl = await getBackendUrl();
-  const apiUrl = `${backendUrl}/api/audio/transcribe-file`;
-  const requestId = `live_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const claimId = `chunk_${Date.now()}`;
-  const sessionId = await getExtensionSessionId();
-
-  const formData = new FormData();
-  formData.append("request_id", requestId);
-  formData.append("claim_id", claimId);
-  formData.append("file", audioBlob, "chunk.wav");
-  formData.append("language", "en");
-  formData.append("session_id", sessionId);
-  formData.append("page_url", location.href);
-  formData.append("source_context", "chrome_extension");
-  formData.append("input_type", "live_transcript");
-
-  const response = await fetch(apiUrl, { method: "POST", body: formData });
-  if (!response.ok) {
-    throw new Error(`Backend ${response.status}`);
-  }
-
-  const result = await response.json();
-  console.log("[TruthLens] Live chunk result:", result);
-  if (result && result.error && !result.transcription) {
-    throw new Error(result.error);
-  }
-
-  const tx = result?.transcription || result;
-  let text = tx?.full_text || tx?.text || "";
-  if (!text && Array.isArray(tx?.segments)) {
-    text = tx.segments.map((s) => s.text || "").join(" ");
-  }
-  text = normalizeText(text || "");
-  if (!text) return;
-
-  // Deduplicate overlap between rolling windows (prevents repeated text spam)
-  const historyContext = tailWords(TLX_LIVE_STATE.emittedText, 120);
-  const delta = computeDeltaTranscript(historyContext, text);
-  if (!delta) return;
-  let merged = mergeTranscript(TLX_LIVE_STATE.emittedText, delta);
-  if (merged.length > TLX_LIVE_MAX_CHARS) {
-    merged = merged.slice(-TLX_LIVE_MAX_CHARS);
-  }
-  TLX_LIVE_STATE.emittedText = merged;
-  TLX_LIVE_STATE.lastWindowText = text;
-  // Persist the cumulative transcript so it survives reloads
-  try {
-    const storageKey = `tlx_live_${location.href}`;
-    if (chrome?.storage?.local) {
-      chrome.storage.local.set({ [storageKey]: TLX_LIVE_STATE.emittedText });
-    }
-  } catch (e) {
-    console.warn("[TruthLens] Failed to persist live transcript:", e);
-  }
-
-  chrome.runtime.sendMessage({
-    type: "TRANSCRIPT_CHUNK",
-    payload: { text: delta }
-  }).catch(() => {});
-}
 
 function normalizeText(s) {
   return String(s || "")
@@ -411,11 +330,6 @@ function tokenizeForMatch(text) {
     .filter((t) => t.key);
 }
 
-function tailWords(text, n) {
-  const toks = normalizeText(text).split(" ").filter(Boolean);
-  if (toks.length <= n) return toks.join(" ");
-  return toks.slice(-n).join(" ");
-}
 
 function jaccardSimilarity(keysA, keysB) {
   const a = new Set(keysA.filter(Boolean));
