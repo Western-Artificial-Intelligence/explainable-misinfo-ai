@@ -95,7 +95,7 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
     tokenizer = build_tokenizer(backbone)
     ds = ds.map(lambda b: tokenize_batch(b, tokenizer=tokenizer, max_len=max_len), batched=True)
     # Keep required columns for set_format
-    set_cols = ["input_ids", "attention_mask", "label_3way", "label_bin", "source_id"]
+    set_cols = ["input_ids", "attention_mask", "label", "source_id"]
     ds.set_format(type="torch", columns=set_cols)
 
     train_ds = ds["train"]
@@ -108,7 +108,7 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,num_workers=4, pin_memory=True)
 
     # Model
-    num_sources = len(set(train_ds["source_id"])) if len(train_ds) > 0 else 3
+    num_sources = len(set(int(x) for x in train_ds["source_id"])) if len(train_ds) > 0 else 3
     model = DomainAdversarialClassifier(backbone_name=backbone, num_sources=num_sources, lambda_adv=config["model"]["lambda_adv"])
 
     # Apply LoRA if desired
@@ -190,20 +190,19 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
         for batch_idx, batch in enumerate(pbar):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            label_3way = batch["label_3way"].to(device)
-            label_bin = batch["label_bin"].to(device)
+            label = batch["label"].to(device)
             source_id = batch["source_id"].to(device)
 
             # Mixed precision if available
             if scaler is not None:
                 with torch.cuda.amp.autocast():
                     outputs = model(input_ids=input_ids, attention_mask=attention_mask,
-                                    label_3way=label_3way, label_bin=label_bin, source_id=source_id)
+                                    label=label, source_id=source_id)
                     loss = outputs["loss"] / grad_accum_steps
                 scaler.scale(loss).backward()
             else:
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask,
-                                label_3way=label_3way, label_bin=label_bin, source_id=source_id)
+                                label=label, source_id=source_id)
                 loss = outputs["loss"] / grad_accum_steps
                 loss.backward()
 
@@ -211,9 +210,9 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
             with torch.no_grad():
                 logits = outputs["logits_label"]
                 preds = torch.argmax(logits, dim=-1)
-                mask = (label_3way != -100)
+                mask = (label != -100)
                 if mask.any():
-                    running_correct += (preds[mask] == label_3way[mask]).sum().item()
+                    running_correct += (preds[mask] == label[mask]).sum().item()
                     running_total += mask.sum().item()
             running_loss += loss.item() * grad_accum_steps
 
@@ -301,16 +300,16 @@ def train(config_path: str, run_name: str, resume_from: str = None, backbone: st
             print(f"  Val ECE:         {val_ece:.4f}" if val_ece is not None else "  Val ECE:         N/A")
             print(f"  Best Val F1:     {best_metric:.4f}")
             if per_class:
-                labels = ["false", "mixed", "true"]
+                labels = ["false", "true"]
                 print(f"  Per-class:")
                 print(f"    {'Class':<8} {'Prec':>8} {'Recall':>8} {'F1':>8}")
                 for i, lbl in enumerate(labels):
                     print(f"    {lbl:<8} {per_class['precision'][i]:>8.4f} {per_class['recall'][i]:>8.4f} {per_class['f1'][i]:>8.4f}")
             if cm:
                 print(f"  Confusion Matrix (rows=true, cols=pred):")
-                print(f"    {'':>8} {'false':>8} {'mixed':>8} {'true':>8}")
-                for i, lbl in enumerate(["false", "mixed", "true"]):
-                    print(f"    {lbl:>8} {cm[i][0]:>8} {cm[i][1]:>8} {cm[i][2]:>8}")
+                print(f"    {'':>8} {'false':>8} {'true':>8}")
+                for i, lbl in enumerate(["false", "true"]):
+                    print(f"    {lbl:>8} {cm[i][0]:>8} {cm[i][1]:>8}")
             print(f"{'='*60}\n")
 
         # Early stopping
@@ -337,12 +336,11 @@ def evaluate_on_loader(model, loader, device):
         for batch in tqdm(loader, desc="Validation", leave=False):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            label_3way = batch["label_3way"].to(device)
-            label_bin = batch["label_bin"].to(device)
+            label = batch["label"].to(device)
             source_id = batch["source_id"].to(device)
 
             out = model(input_ids=input_ids, attention_mask=attention_mask,
-                        label_3way=label_3way, label_bin=label_bin, source_id=source_id)
+                        label=label, source_id=source_id)
             logits = out["logits_label"]
             if out.get("loss") is not None:
                 total_loss += out["loss"].item()
@@ -352,7 +350,7 @@ def evaluate_on_loader(model, loader, device):
 
             all_probs.append(probs)
             all_preds.append(preds)
-            all_labels.append(label_3way.cpu().numpy())
+            all_labels.append(label.cpu().numpy())
 
     if len(all_preds) == 0:
         return {"accuracy": None, "macro_f1": None, "val_loss": None, "ece": None, "per_class": None}

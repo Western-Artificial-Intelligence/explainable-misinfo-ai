@@ -35,7 +35,7 @@ def load_checkpoint_model(
 
 
 def predict(model, tokenizer, claim: str, article: str, max_len: int = 256, device: str = "cpu"):
-    """Run a single inference and return probabilities for 3-way labels."""
+    """Run a single inference and return probabilities for binary labels (false/true)."""
     text = f"<CLAIM> {claim} </CLAIM> <ARTICLE> {article} </ARTICLE>"
     enc = tokenizer(text, truncation=True, padding="max_length", max_length=max_len, return_tensors="pt")
     input_ids = enc["input_ids"].to(device)
@@ -66,8 +66,10 @@ if __name__ == "__main__":
 
     probs = predict(model, tokenizer, args.claim, args.article, max_len=256, device=args.device)
     pred_label = int(probs.index(max(probs)))
+    label_names = ["false", "true"]
 
     print(json.dumps({
-        "probs": probs,
-        "pred_label": pred_label
+        "probs": {label_names[i]: round(p, 4) for i, p in enumerate(probs)},
+        "pred_label": pred_label,
+        "pred_name": label_names[pred_label],
     }, indent=2))

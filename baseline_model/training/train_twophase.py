@@ -119,15 +119,13 @@ def evaluate_on_loader_extended(model, loader, device, ece_bins=15):
         for batch in tqdm(loader, desc="Evaluating", leave=False):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            label_3way = batch["label_3way"].to(device)
-            label_bin = batch["label_bin"].to(device)
+            label = batch["label"].to(device)
             source_id = batch["source_id"].to(device)
 
             out = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                label_3way=label_3way,
-                label_bin=label_bin,
+                label=label,
                 source_id=source_id,
             )
             logits = out["logits_label"]
@@ -139,7 +137,7 @@ def evaluate_on_loader_extended(model, loader, device, ece_bins=15):
             preds = probs.argmax(axis=1)
             all_probs.append(probs)
             all_preds.append(preds)
-            all_labels.append(label_3way.cpu().numpy())
+            all_labels.append(label.cpu().numpy())
 
             # Domain accuracy
             if out.get("logits_domain") is not None:
@@ -237,8 +235,7 @@ def train_phase(
         for batch_idx, batch in enumerate(pbar):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            label_3way = batch["label_3way"].to(device)
-            label_bin = batch["label_bin"].to(device)
+            label = batch["label"].to(device)
             source_id = batch["source_id"].to(device)
 
             if scaler is not None:
@@ -246,8 +243,7 @@ def train_phase(
                     outputs = model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        label_3way=label_3way,
-                        label_bin=label_bin,
+                        label=label,
                         source_id=source_id,
                     )
                     loss = outputs["loss"] / grad_accum_steps
@@ -256,8 +252,7 @@ def train_phase(
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    label_3way=label_3way,
-                    label_bin=label_bin,
+                    label=label,
                     source_id=source_id,
                 )
                 loss = outputs["loss"] / grad_accum_steps
@@ -267,9 +262,9 @@ def train_phase(
             with torch.no_grad():
                 logits = outputs["logits_label"]
                 preds = torch.argmax(logits, dim=-1)
-                mask = label_3way != -100
+                mask = label != -100
                 if mask.any():
-                    running_correct += (preds[mask] == label_3way[mask]).sum().item()
+                    running_correct += (preds[mask] == label[mask]).sum().item()
                     running_total += mask.sum().item()
             running_loss += loss.item() * grad_accum_steps
 
@@ -410,7 +405,7 @@ def train_phase(
         )
         print(f"  Best Val F1:      {best_metric:.4f}")
         if per_class:
-            labels = ["false", "mixed", "true"]
+            labels = ["false", "true"]
             print(f"  Per-class:")
             print(f"    {'Class':<8} {'Prec':>8} {'Recall':>8} {'F1':>8}")
             for i, lbl in enumerate(labels):
@@ -498,7 +493,7 @@ def train_twophase(config_path: str, run_name: str = None, backbone: str = None)
     ds = ds.map(
         lambda b: tokenize_batch(b, tokenizer=tokenizer, max_len=max_len), batched=True
     )
-    set_cols = ["input_ids", "attention_mask", "label_3way", "label_bin", "source_id"]
+    set_cols = ["input_ids", "attention_mask", "label", "source_id"]
     ds.set_format(type="torch", columns=set_cols)
 
     train_ds = ds["train"]

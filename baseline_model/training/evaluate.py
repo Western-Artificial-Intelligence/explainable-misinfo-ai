@@ -79,7 +79,7 @@ def evaluate_checkpoint(checkpoint_path: str, config_path: str, backbone: str = 
     ds = ds.map(lambda b: tokenize_batch(b, tokenizer=tokenizer, max_len=max_len), batched=True)
     ds.set_format(
         type="torch",
-        columns=["input_ids", "attention_mask", "label_3way", "label_bin", "source_id"],
+        columns=["input_ids", "attention_mask", "label", "source_id"],
     )
 
     test_ds = ds["test"]
@@ -129,15 +129,13 @@ def evaluate_checkpoint(checkpoint_path: str, config_path: str, backbone: str = 
         for batch in tqdm(test_loader, desc="Evaluating on test set"):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
-            label_3way = batch["label_3way"].to(device)
-            label_bin = batch["label_bin"].to(device)
+            label = batch["label"].to(device)
             source_id = batch["source_id"].to(device)
 
             out = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                label_3way=label_3way,
-                label_bin=label_bin,
+                label=label,
                 source_id=source_id,
             )
             logits = out["logits_label"]
@@ -150,7 +148,7 @@ def evaluate_checkpoint(checkpoint_path: str, config_path: str, backbone: str = 
 
             all_probs.append(probs)
             all_preds.append(preds)
-            all_labels.append(label_3way.cpu().numpy())
+            all_labels.append(label.cpu().numpy())
 
     all_probs = np.concatenate(all_probs, axis=0)
     all_preds = np.concatenate(all_preds, axis=0)
@@ -162,7 +160,7 @@ def evaluate_checkpoint(checkpoint_path: str, config_path: str, backbone: str = 
     test_loss = total_loss / max(1, num_batches)
 
     # Print results
-    labels = ["false", "mixed", "true"]
+    labels = ["false", "true"]
     per_class = metrics.get("per_class")
     cm = metrics.get("confusion_matrix")
 
@@ -183,9 +181,9 @@ def evaluate_checkpoint(checkpoint_path: str, config_path: str, backbone: str = 
             print(f"    {lbl:<8} {per_class['precision'][i]:>8.4f} {per_class['recall'][i]:>8.4f} {per_class['f1'][i]:>8.4f}")
     if cm:
         print(f"  Confusion Matrix (rows=true, cols=pred):")
-        print(f"    {'':>8} {'false':>8} {'mixed':>8} {'true':>8}")
+        print(f"    {'':>8} {'false':>8} {'true':>8}")
         for i, lbl in enumerate(labels):
-            print(f"    {lbl:>8} {cm[i][0]:>8} {cm[i][1]:>8} {cm[i][2]:>8}")
+            print(f"    {lbl:>8} {cm[i][0]:>8} {cm[i][1]:>8}")
     print(f"{'=' * 60}\n")
 
     # Save results
