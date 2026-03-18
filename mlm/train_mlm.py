@@ -2,9 +2,13 @@ import os
 from pathlib import Path
 from datasets import concatenate_datasets, load_dataset
 from transformers import AutoTokenizer, AutoModelForMaskedLM, DataCollatorForLanguageModeling, TrainingArguments, Trainer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 MODEL_NAME = "roberta-base"
 DATASET_NAME = "ioverho/misinfo-general"
+HF_TOKEN = os.getenv('HF_TOKEN')
 
 BASE_OUT = Path("./models/mlm")
 os.makedirs(BASE_OUT, exist_ok=True)
@@ -26,7 +30,7 @@ def main():
     #load all year splits
     print("loading misinfo-general from huggingface")
     if HF_CACHE:
-        raw = load_dataset(DATASET_NAME, cache_dir=HF_CACHE)
+        raw = load_dataset(DATASET_NAME, cache_dir=HF_CACHE, token = HF_TOKEN)
     else:
         raw = load_dataset(DATASET_NAME)
 
