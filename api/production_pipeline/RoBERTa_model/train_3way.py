@@ -23,8 +23,7 @@ import torch.nn.functional as F
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import get_linear_schedule_with_warmup
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, get_linear_schedule_with_warmup
 from tqdm import tqdm
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
