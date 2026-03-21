@@ -21,9 +21,8 @@ import pandas as pd
 from pathlib import Path
 from datasets import load_dataset
 
-HERE      = Path(__file__).resolve().parent
-LIAR_PATH = HERE / "unified_liar.parquet"
-OUT_PATH  = HERE / "combined_data.parquet"
+HERE     = Path(__file__).resolve().parent
+OUT_PATH = HERE / "combined_data.parquet"
 
 MAX_PER_CLASS = 20_000
 SEED          = 42
@@ -34,9 +33,37 @@ FEVER_LABEL_MAP = {
     "NOT ENOUGH INFO": "mixed",
 }
 
+LIAR_LABEL_MAP = {
+    "true":        "true",
+    "mostly-true": "true",
+    "half-true":   "mixed",
+    "barely-true": "mixed",
+    "false":       "false",
+    "pants-fire":  "false",
+}
+
+LIAR_COLS = [
+    "id", "label", "statement", "subject", "speaker",
+    "job", "state", "party", "barely_true", "false_c",
+    "half_true", "mostly_true", "pants_fire", "context",
+]
+
 
 def load_liar():
-    df = pd.read_parquet(LIAR_PATH)[["claim_text", "label_3way"]].dropna()
+    print("[data] Downloading LIAR TSV files from HuggingFace...")
+    dfs = []
+    for fname in ["train.tsv", "valid.tsv", "test.tsv"]:
+        df = pd.read_csv(
+            f"hf://datasets/liar/{fname}",
+            sep="\t", header=None, names=LIAR_COLS,
+        )
+        dfs.append(df)
+
+    raw = pd.concat(dfs, ignore_index=True)
+    raw["label_3way"] = raw["label"].map(LIAR_LABEL_MAP)
+    raw = raw.dropna(subset=["statement", "label_3way"])
+    df = raw[["statement", "label_3way"]].rename(columns={"statement": "claim_text"})
+    df = df.drop_duplicates(subset=["claim_text"]).reset_index(drop=True)
     df["source"] = "liar"
     print(f"[data] LIAR       : {len(df):>6}  | {dict(df['label_3way'].value_counts())}")
     return df
