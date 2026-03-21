@@ -1,14 +1,9 @@
 """
 Prepare combined training data for 3-way RoBERTa classifier.
 
-Sources (both from HuggingFace):
-  - LIAR dataset  → lhoestq/liar  (statement → false / mixed / true)
-  - FEVER v1.0    → fever          (claim     → false / mixed / true)
-
-Label mapping (LIAR 6-way → 3-way):
-  true, mostly-true          → true
-  half-true, barely-true     → mixed
-  false, pants-fire          → false
+Sources:
+  - LIAR : unified_liar.parquet (local, already in repo)
+  - FEVER: v1.0 from HuggingFace (claim → false / mixed / true)
 
 Label mapping (FEVER):
   SUPPORTS        → true
@@ -26,20 +21,12 @@ import pandas as pd
 from pathlib import Path
 from datasets import load_dataset
 
-HERE     = Path(__file__).resolve().parent
-OUT_PATH = HERE / "combined_data.parquet"
+HERE      = Path(__file__).resolve().parent
+LIAR_PATH = HERE / "unified_liar.parquet"
+OUT_PATH  = HERE / "combined_data.parquet"
 
 MAX_PER_CLASS = 20_000
 SEED          = 42
-
-LIAR_LABEL_MAP = {
-    "true":         "true",
-    "mostly-true":  "true",
-    "half-true":    "mixed",
-    "barely-true":  "mixed",
-    "false":        "false",
-    "pants-fire":   "false",
-}
 
 FEVER_LABEL_MAP = {
     "SUPPORTS":        "true",
@@ -49,22 +36,8 @@ FEVER_LABEL_MAP = {
 
 
 def load_liar():
-    print("[data] Downloading LIAR from HuggingFace...")
-    ds = load_dataset("liar")
-
-    rows = []
-    for split in ["train", "validation", "test"]:
-        if split not in ds:
-            continue
-        for ex in ds[split]:
-            label = LIAR_LABEL_MAP.get(ex.get("label", ""))
-            if label is None:
-                continue
-            claim = (ex.get("statement") or "").strip()
-            if claim:
-                rows.append({"claim_text": claim, "label_3way": label, "source": "liar"})
-
-    df = pd.DataFrame(rows).drop_duplicates(subset=["claim_text"]).reset_index(drop=True)
+    df = pd.read_parquet(LIAR_PATH)[["claim_text", "label_3way"]].dropna()
+    df["source"] = "liar"
     print(f"[data] LIAR       : {len(df):>6}  | {dict(df['label_3way'].value_counts())}")
     return df
 
