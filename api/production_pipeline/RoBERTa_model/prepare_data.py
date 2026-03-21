@@ -53,14 +53,19 @@ FEVER_LABEL_MAP = {
 
 def load_liar():
     print("[data] Downloading LIAR from HuggingFace...")
-    ds = load_dataset("liar")
+    ds = load_dataset("liar", trust_remote_code=True)
+
+    # Labels may be integers (ClassLabel) — resolve to string names
+    label_feature = ds["train"].features["label"]
 
     rows = []
     for split in ["train", "validation", "test"]:
         if split not in ds:
             continue
         for ex in ds[split]:
-            label = LIAR_LABEL_MAP.get(ex.get("label", ""))
+            raw_label = ex.get("label")
+            label_str = label_feature.int2str(raw_label) if isinstance(raw_label, int) else str(raw_label)
+            label = LIAR_LABEL_MAP.get(label_str)
             if label is None:
                 continue
             claim = (ex.get("statement") or "").strip()
