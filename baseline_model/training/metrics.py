@@ -37,11 +37,11 @@ def compute_basic_metrics(preds: np.ndarray, labels: np.ndarray):
         }
 
     p, r, f, _ = precision_recall_fscore_support(
-        labels[mask], preds[mask], labels=[0, 1, 2], zero_division=0
+        labels[mask], preds[mask], labels=[0, 1], zero_division=0
     )
     macro_f1 = np.mean(f)
     acc = accuracy_score(labels[mask], preds[mask])
-    cm = confusion_matrix(labels[mask], preds[mask], labels=[0, 1, 2])
+    cm = confusion_matrix(labels[mask], preds[mask], labels=[0, 1])
     per_class = {"precision": p.tolist(), "recall": r.tolist(), "f1": f.tolist()}
 
     return {"accuracy": acc, "macro_f1": macro_f1, "per_class": per_class, "confusion_matrix": cm.tolist()}

@@ -8,24 +8,19 @@ def create_example_rows() -> List[Dict]:
     """
     Return a small list of example rows following the expected schema.
 
-    The synthetic examples cover:
-    - LIAR-style 3-way labels
-    - Binary-labeled rows
-    - Multiple dataset sources (source_id)
-    - train/val/test splits
+    Binary labels: 0 = false, 1 = true.
+    Multiple dataset sources (source_id) and train/val/test splits.
     """
 
     rows: List[Dict] = []
 
-    # LIAR-style examples (3-way)
     rows += [
         {
             "input_text": (
                 "<CLAIM> Vaccines cause autism </CLAIM> "
                 "<ARTICLE> Short note: This claim is false. </ARTICLE>"
             ),
-            "label_3way": 0,  # false
-            "label_bin": -100,
+            "label": 0,  # false
             "source_id": 0,
             "split": "train",
         },
@@ -34,8 +29,7 @@ def create_example_rows() -> List[Dict]:
                 "<CLAIM> New study shows coffee reduces risk of cancer </CLAIM> "
                 "<ARTICLE> Summary: Study has mixed results. </ARTICLE>"
             ),
-            "label_3way": 1,  # mixed
-            "label_bin": -100,
+            "label": 0,  # false (mixed -> false)
             "source_id": 0,
             "split": "val",
         },
@@ -44,22 +38,16 @@ def create_example_rows() -> List[Dict]:
                 "<CLAIM> Historic artifact discovered in 2024 confirms lost city </CLAIM> "
                 "<ARTICLE> Press release indicates legitimate find. </ARTICLE>"
             ),
-            "label_3way": 2,  # true
-            "label_bin": -100,
+            "label": 1,  # true
             "source_id": 0,
             "split": "test",
         },
-    ]
-
-    # Binary-labeled examples from other sources
-    rows += [
         {
             "input_text": (
                 "<CLAIM> Drinking bleach cures disease </CLAIM> "
                 "<ARTICLE> Blog post: extremely dangerous and false. </ARTICLE>"
             ),
-            "label_3way": -100,
-            "label_bin": 0,  # false
+            "label": 0,  # false
             "source_id": 1,
             "split": "train",
         },
@@ -68,8 +56,7 @@ def create_example_rows() -> List[Dict]:
                 "<CLAIM> Breakthrough in energy tech can power city on one battery </CLAIM> "
                 "<ARTICLE> News: claims are overhyped. </ARTICLE>"
             ),
-            "label_3way": -100,
-            "label_bin": 1,  # true-ish (coarse)
+            "label": 1,  # true
             "source_id": 1,
             "split": "val",
         },
@@ -78,8 +65,7 @@ def create_example_rows() -> List[Dict]:
                 "<CLAIM> Celebrity endorses miracle product </CLAIM> "
                 "<ARTICLE> Influencer post with no evidence. </ARTICLE>"
             ),
-            "label_3way": -100,
-            "label_bin": 0,
+            "label": 0,  # false
             "source_id": 2,
             "split": "test",
         },
@@ -93,8 +79,7 @@ def create_example_rows() -> List[Dict]:
                     f"<CLAIM> Synthetic claim {i} </CLAIM> "
                     f"<ARTICLE> Example article content {i}. </ARTICLE>"
                 ),
-                "label_3way": 0 if i % 3 == 0 else 2,
-                "label_bin": -100,
+                "label": 0 if i % 2 == 0 else 1,
                 "source_id": i % 3,
                 "split": "train" if i < 6 else "val",
             }

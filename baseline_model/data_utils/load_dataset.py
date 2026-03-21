@@ -20,6 +20,29 @@ def _build_input_text(example):
         return {"input_text": f"<CLAIM> {claim} </CLAIM>"}
 
 
+def _build_binary_label(example):
+    """Create a unified binary label from label_3way and label_bin.
+
+    Mapping:
+      - label_3way: 0 (false) -> 0, 1 (mixed) -> 0, 2 (true) -> 1
+      - label_bin: 0 -> 0, 1 -> 1
+      - Prefers label_3way if available (not -100), falls back to label_bin.
+      - If both are -100, label is set to -100.
+    """
+    label_3way = example.get("label_3way", -100)
+    label_bin = example.get("label_bin", -100)
+
+    if label_3way != -100:
+        # false=0, mixed=1 -> 0 (false); true=2 -> 1 (true)
+        label = 1 if label_3way == 2 else 0
+    elif label_bin != -100:
+        label = int(label_bin)
+    else:
+        label = -100
+
+    return {"label": label}
+
+
 def load_merged_dataset(path: str, create_synthetic_if_missing: bool = True):
     """
     Load a merged HuggingFace dataset from disk.
@@ -28,13 +51,8 @@ def load_merged_dataset(path: str, create_synthetic_if_missing: bool = True):
     - HuggingFace DatasetDict saved with save_to_disk()
     - Directory of parquet files named unified_{split}.parquet
 
-    The dataset must contain the columns:
-        - label_3way: int (0,1,2) or -100
-        - label_bin: int (0,1) or -100
-        - source_id: int
-
-    For parquet files, input_text is built from claim_text + article_text
-    using <CLAIM>/<ARTICLE> special tokens.
+    Creates a unified binary 'label' column (0=false, 1=true) from
+    label_3way and label_bin.
 
     Returns:
         DatasetDict with keys {"train", "val", "test"}.
@@ -68,6 +86,7 @@ def load_merged_dataset(path: str, create_synthetic_if_missing: bool = True):
         for split_name, parquet_path in parquet_files.items():
             ds = Dataset.from_parquet(str(parquet_path))
             ds = ds.map(_build_input_text, desc=f"Building input_text ({split_name})")
+            ds = ds.map(_build_binary_label, desc=f"Building binary label ({split_name})")
             splits[split_name] = ds
         return DatasetDict(splits)
 
@@ -75,6 +94,9 @@ def load_merged_dataset(path: str, create_synthetic_if_missing: bool = True):
     ds = load_from_disk(path)
 
     if isinstance(ds, DatasetDict):
+        # Add binary label column if not present
+        if "label" not in ds["train"].column_names:
+            ds = ds.map(_build_binary_label, desc="Building binary label")
         return ds
     else:
         raise ValueError(

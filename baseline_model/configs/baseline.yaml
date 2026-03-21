@@ -1,28 +1,28 @@
 model:
   backbone: roberta-base
   max_length: 256
-  lambda_adv: 0.5
+  lambda_adv: 0.0
 
 lora:
   enabled: true
   r: 8
   alpha: 16
-  dropout: 0.05
+  dropout: 0.1
   target_modules: ["query", "value"]
 
 training:
-  batch_size: 16
-  lr: 1e-4
-  epochs: 35000
-  weight_decay: 0.01
-  warmup_ratio: 0.06
+  batch_size: 32
+  lr: 2e-5
+  epochs: 100
+  weight_decay: 0.1
+  warmup_ratio: 0.1
   grad_clip_norm: 1.0
   seed: 42
   device: auto
   grad_accum_steps: 1
   save_every_epoch: false
-  early_stopping_patience: 10  # stop after N epochs with no val macro-F1 improvement
-  log_every: 1000              # print full metrics every N epochs
+  early_stopping_patience: 20  # stop after N epochs with no val macro-F1 improvement
+  log_every: 5             # print full metrics every N epochs
 
 data:
   dataset_path: ../../data/processed/final_datasets  # relative to baseline_model/configs/
