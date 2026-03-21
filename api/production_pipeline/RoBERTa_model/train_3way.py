@@ -40,7 +40,7 @@ OUT_PATH  = HERE / "best_3way.ckpt"
 
 # ── Hyper-parameters ──────────────────────────────────────────────────────────
 BACKBONE     = "roberta-base"
-EPOCHS       = 10
+EPOCHS       = 20
 LR           = 2e-5
 BATCH_SIZE   = 64       # L4 24 GB — bump to 128 if VRAM allows
 MAX_LEN      = 256
@@ -48,7 +48,7 @@ SEED         = 42
 VAL_FRAC     = 0.10
 WARMUP_RATIO = 0.06
 GRAD_CLIP    = 1.0
-EARLY_STOP   = 3        # epochs without improvement
+EARLY_STOP   = 5        # epochs without improvement
 
 # LoRA
 LORA_R        = 8
