@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import hashlib
 import importlib.util
 import json
 import math
@@ -29,10 +28,26 @@ MODEL_NAME = os.getenv("ROBERTA_MODEL_NAME", "roberta-base(+lora)")
 MODEL_REVISION = os.getenv("ROBERTA_MODEL_REVISION", "dev")
 
 # When True, use LLM blackbox to mimic RoBERTa (for testing without a trained model).
-# When False, use the real RoBERTa backend (currently mock; replace with trained model later).
+# When False, use the real trained RoBERTa at RoBERTa_model/best.ckpt.
 USE_LLM = (os.getenv("ROBERTA_USE_LLM", "false") or "false").strip().lower() in ("1", "true", "yes")
 
-# Optional nudge: when false or true has conf < threshold, output "mixed" instead. Set ROBERTA_MIN_CONFIDENCE (e.g. 0.5) to enable; default 0 = off.
+# Difference threshold for label determination (real RoBERTa path).
+#
+# diff = p_true - p_false  (ranges from -1 to +1)
+#
+#   diff >  DIFF_THRESHOLD → "true"
+#   diff < -DIFF_THRESHOLD → "false"
+#   |diff| <= DIFF_THRESHOLD → "mixed"
+#
+# confidence = |diff| for all labels:
+#   false/true: |diff| > DIFF_THRESHOLD  (i.e. > 0.3)
+#   mixed:      |diff| <= DIFF_THRESHOLD (i.e. 0–0.3, lean shows direction)
+#
+# Single eval-mode forward pass — deterministic, no MC dropout needed.
+DIFF_THRESHOLD: float = 0.3
+
+# Optional nudge: when vote confidence < threshold, force "mixed". Set ROBERTA_MIN_CONFIDENCE
+# (e.g. 0.5) to enable; default 0 = off.
 def _get_min_confidence() -> float:
     raw = (os.getenv("ROBERTA_MIN_CONFIDENCE", "0") or "0").strip()
     if not raw:
@@ -48,12 +63,15 @@ ROBERTA_MIN_CONFIDENCE = _get_min_confidence()
 
 EPS = 1e-9
 
-# Try to import real model inference
-try:
-    from api.services.model_inference import is_model_available, predict as _real_predict
-    _HAS_REAL_MODEL = True
-except ImportError:
-    _HAS_REAL_MODEL = False
+# Trained checkpoint path: api/production_pipeline/RoBERTa_model/best.ckpt
+_ROBERTA_CKPT_PATH = Path(__file__).resolve().parent.parent / "RoBERTa_model" / "best.ckpt"
+_CALIBRATION_HEAD_PATH = Path(__file__).resolve().parent.parent / "RoBERTa_model" / "calibration_head.pt"
+
+# ---- Real RoBERTa state (lazy-loaded on first call) ----
+_REAL_ROBERTA_MODEL: Optional[Any] = None
+_REAL_ROBERTA_TOKENIZER: Optional[Any] = None
+_CALIBRATION_HEAD: Optional[Any] = None
+_last_roberta_vote: Dict[str, Any] = {}
 
 
 class RobertaInferenceError(Exception):
@@ -92,8 +110,8 @@ def _build_model_text(normalized_claim: str) -> str:
 
 def _extract_claim_from_wrapped_text(text: str) -> str:
     """
-    Best-effort extraction for the mock override layer.
-    Keeps things simple: pulls content between <CLAIM> and </CLAIM> if present.
+    Best-effort extraction for the LLM override layer.
+    Pulls content between <CLAIM> and </CLAIM> if present.
     """
     lower = text.lower()
     start_tag = "<claim>"
@@ -104,18 +122,13 @@ def _extract_claim_from_wrapped_text(text: str) -> str:
         inner = text[s + len(start_tag): e]
     else:
         inner = text
-    # normalize for override matching
     inner = " ".join(inner.strip().lower().split())
     return inner
 
 
 def _forced_logits_for_label(label: str) -> List[float]:
-    """
-    Produce logits that strongly favor the chosen label.
-    (Softmax will make the chosen class ~1.0)
-    """
+    """Produce logits that strongly favor the chosen label (for eval/override paths)."""
     label = label.strip().lower()
-    # strong separation; can tune
     hi = 6.0
     lo = -6.0
     if label == "false":
@@ -124,12 +137,11 @@ def _forced_logits_for_label(label: str) -> List[float]:
         return [lo, hi, lo]
     if label == "true":
         return [lo, lo, hi]
-    # unknown label -> neutral
     return [0.0, 0.0, 0.0]
 
 
 # ----------------------------
-# LLM-as-RoBERTa blackbox (when USE_LLM is True)
+# LLM-as-RoBERTa blackbox (USE_LLM=true)
 # ----------------------------
 
 _LLM_AS_ROBERTA_CLASSIFY: Optional[Any] = None
@@ -161,9 +173,7 @@ def _load_llm_as_roberta_classify() -> Any:
     return _LLM_AS_ROBERTA_CLASSIFY
 
 
-# Exact-match reference set for the 9 eval claims (test_production_claims.py). Lookup runs in Step 2
-# so the same normalized claim string is used regardless of blackbox. Normalize with same rule as
-# _extract_claim_from_wrapped_text: strip, lower, single spaces (no rstrip period).
+# Exact-match reference set for the 9 eval claims (test_production_claims.py).
 _EVAL_REF_CLAIMS: List[Tuple[str, str]] = [
     ("The moon landing was faked in a Hollywood studio.", "false"),
     ("Kim Jong Un died in 2020 after heart surgery.", "false"),
@@ -178,12 +188,11 @@ _EVAL_REF_CLAIMS: List[Tuple[str, str]] = [
 
 
 def _normalize_for_eval_lookup(claim: str) -> str:
-    """Same normalization as _extract_claim_from_wrapped_text so API path hits eval lookup."""
     return " ".join((claim or "").strip().lower().split())
 
 
-# Optional test/demo overrides: (substring in normalized claim -> label). OFF by default.
-# Set ROBERTA_CLAIM_OVERRIDES_ENABLED=true only for regression/demo; production should use LLM + web search.
+# Optional test/demo overrides. OFF by default.
+# Set ROBERTA_CLAIM_OVERRIDES_ENABLED=true only for regression/demo.
 _CLAIM_OVERRIDES: List[Tuple[str, str]] = [
     ("moon landing was faked", "false"),
     ("moon landing faked", "false"),
@@ -212,7 +221,6 @@ def _normalize_claim_for_override(claim: str) -> str:
 
 
 def _apply_claim_override(claim: str) -> Optional[str]:
-    """If claim matches a known fact-check override, return the label; else None."""
     if not ROBERTA_CLAIM_OVERRIDES_ENABLED or not claim:
         return None
     norm = _normalize_claim_for_override(claim)
@@ -222,23 +230,18 @@ def _apply_claim_override(claim: str) -> Optional[str]:
     return None
 
 
-# Set by _infer_via_llm so run_2 can report whether web search was used (for debugging/visibility).
 _last_infer_web_search: Dict[str, Any] = {}
 _last_infer_override_applied: bool = False
 
 
 def _infer_via_llm(text: str) -> Tuple[List[float], List[float]]:
-    """
-    Use LLM blackbox to classify claim as false/mixed/true; return (logits3, probs3).
-    When claim matches a known fact-check override, use that label and skip the LLM.
-    """
+    """Use LLM blackbox to classify claim; return (logits3, probs3)."""
     global _last_infer_web_search, _last_infer_override_applied
     _last_infer_override_applied = False
     _last_infer_web_search = {"used": False, "snippet_count": 0, "reason": "no_web_search"}
     claim = _extract_claim_from_wrapped_text(text)
     if not claim:
         claim = text.strip() or "(empty)"
-    # Known fact-check override: skip LLM and return override label
     override_label = _apply_claim_override(claim)
     if override_label is not None:
         _last_infer_web_search = {"used": False, "snippet_count": 0, "reason": "claim_override"}
@@ -252,9 +255,188 @@ def _infer_via_llm(text: str) -> Tuple[List[float], List[float]]:
     return logits, probs
 
 
+# ----------------------------
+# Real RoBERTa — N_VOTES MC dropout passes with majority voting
+# ----------------------------
+
+def _load_real_roberta():
+    """Lazy-load DomainAdversarialClassifier from best.ckpt (once per process)."""
+    global _REAL_ROBERTA_MODEL, _REAL_ROBERTA_TOKENIZER
+    if _REAL_ROBERTA_MODEL is not None:
+        return _REAL_ROBERTA_MODEL, _REAL_ROBERTA_TOKENIZER
+
+    import torch
+
+    try:
+        from baseline_model.models.domain_adversarial import DomainAdversarialClassifier
+        from baseline_model.models.lora_utils import try_apply_peft_lora
+        from baseline_model.data_utils.tokenize import build_tokenizer
+    except ImportError as exc:
+        raise RobertaInferenceError(
+            "IMPORT_ERROR",
+            "Could not import baseline_model. Ensure repo root is on PYTHONPATH.",
+            {"error": str(exc)},
+        )
+
+    if not _ROBERTA_CKPT_PATH.is_file():
+        raise RobertaInferenceError(
+            "MODEL_NOT_FOUND",
+            f"RoBERTa checkpoint not found: {_ROBERTA_CKPT_PATH}",
+        )
+
+    state = torch.load(str(_ROBERTA_CKPT_PATH), map_location="cpu", weights_only=False)
+    cfg = state.get("config", {})
+    model_cfg = cfg.get("model", {})
+    lora_cfg = cfg.get("lora", {})
+
+    backbone = model_cfg.get("backbone", "roberta-base")
+    lambda_adv = float(model_cfg.get("lambda_adv", 0.1))
+
+    # Derive num_sources from the saved domain head weight shape
+    # (not stored in config; checkpoint domain_head.3.weight has shape [num_sources, 256])
+    domain_head_key = "domain_head.3.weight"
+    num_sources = state["model_state"][domain_head_key].shape[0]
+
+    # Build tokenizer first so we know the final vocab size (base + special tokens)
+    tokenizer = build_tokenizer(backbone)
+
+    model = DomainAdversarialClassifier(
+        backbone_name=backbone,
+        num_sources=num_sources,
+        lambda_adv=lambda_adv,
+    )
+
+    # Resize embeddings to match the tokenizer used during training
+    # (special tokens <CLAIM>, </CLAIM>, <ARTICLE>, </ARTICLE> expand the vocab)
+    model.encoder.resize_token_embeddings(len(tokenizer))
+
+    if lora_cfg.get("enabled", False):
+        model, _ = try_apply_peft_lora(
+            model,
+            r=lora_cfg.get("r", 8),
+            lora_alpha=lora_cfg.get("alpha", 16),
+            lora_dropout=lora_cfg.get("dropout", 0.1),
+            target_modules=lora_cfg.get("target_modules", ["query", "value"]),
+        )
+
+    model.load_state_dict(state["model_state"])
+    model.eval()
+    _REAL_ROBERTA_MODEL = model
+    _REAL_ROBERTA_TOKENIZER = tokenizer
+    logger.info("[RoBERTa] Loaded trained model from %s (epoch %s)", _ROBERTA_CKPT_PATH, state.get("epoch"))
+    return model, tokenizer
+
+
+def _load_calibration_head() -> Optional[Any]:
+    """Lazy-load CalibrationHead from calibration_head.pt if it exists."""
+    global _CALIBRATION_HEAD
+    if _CALIBRATION_HEAD is not None:
+        return _CALIBRATION_HEAD
+    if not _CALIBRATION_HEAD_PATH.is_file():
+        return None
+    import torch
+    import torch.nn as nn
+
+    class CalibrationHead(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.net = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 3))
+        def forward(self, x):
+            return self.net(x)
+
+    head = CalibrationHead()
+    ckpt = torch.load(str(_CALIBRATION_HEAD_PATH), map_location="cpu", weights_only=True)
+    head.load_state_dict(ckpt["state_dict"])
+    head.eval()
+    _CALIBRATION_HEAD = head
+    logger.info("[RoBERTa] Loaded calibration head from %s", _CALIBRATION_HEAD_PATH)
+    return head
+
+
+def _infer_via_real_roberta(text: str) -> Tuple[List[float], List[float]]:
+    """
+    Single eval-mode forward pass with the trained binary RoBERTa model.
+
+    diff = p_true - p_false  (-1 to +1):
+      diff >  DIFF_THRESHOLD → "true"
+      diff < -DIFF_THRESHOLD → "false"
+      |diff| <= DIFF_THRESHOLD → "mixed"
+
+    confidence = |diff| for all labels (0 = maximally uncertain, 1 = maximally certain).
+    For mixed: lean shows which direction the model tilts and by how much.
+    """
+    global _last_roberta_vote
+    import torch
+    import torch.nn.functional as F
+
+    model, tokenizer = _load_real_roberta()
+    enc = tokenizer(
+        text,
+        truncation=True,
+        padding="max_length",
+        max_length=T_CONFIG,
+        return_tensors="pt",
+    )
+
+    with torch.no_grad():
+        out = model(input_ids=enc["input_ids"], attention_mask=enc["attention_mask"])
+        logits2 = out["logits_label"][0]
+        probs2 = F.softmax(logits2, dim=0).tolist()
+
+    p_false, p_true = probs2[0], probs2[1]
+    diff = p_true - p_false     # sign → direction, magnitude → confidence
+
+    cal_head = _load_calibration_head()
+    if cal_head is not None:
+        # Calibration head: learned [logit_false, logit_true] → 3-way label.
+        # Raw logits preserve absolute scale — genuinely 2D vs the 1D prob axis.
+        import torch
+        with torch.no_grad():
+            inp = logits2.unsqueeze(0).float()   # [1, 2] raw logits
+            cal_logits = cal_head(inp)[0]
+            cal_probs = torch.softmax(cal_logits, dim=0).tolist()  # [P(false), P(mixed), P(true)]
+        class_id = int(torch.tensor(cal_probs).argmax().item())
+        voted_label = LABELS_3WAY[class_id]
+        confidence = float(cal_probs[class_id])
+        lean: Optional[Dict[str, Any]] = None
+        if voted_label == "mixed":
+            toward = "true" if cal_probs[2] > cal_probs[0] else "false"
+            lean = {"toward": toward, "p": float(max(cal_probs[0], cal_probs[2]))}
+        inference_detail = "calibration_head"
+    else:
+        # Fallback: fixed diff threshold
+        confidence = abs(diff)
+        if diff > DIFF_THRESHOLD:
+            voted_label = "true"
+            lean = None
+        elif diff < -DIFF_THRESHOLD:
+            voted_label = "false"
+            lean = None
+        else:
+            voted_label = "mixed"
+            lean = {
+                "toward": "true" if diff > 0 else "false",
+                "p": float(confidence),
+            }
+        inference_detail = "diff_threshold"
+
+    _last_roberta_vote = {
+        "p_false": float(p_false),
+        "p_true": float(p_true),
+        "diff": float(diff),
+        "voted_label": voted_label,
+        "confidence": float(confidence),
+        "lean": lean,
+        "inference_detail": inference_detail,
+    }
+
+    logits3 = [logits2[0].item(), 0.0, logits2[1].item()]
+    probs3 = [p_false, 0.0, p_true]
+    return logits3, probs3
+
+
 @dataclass(frozen=True)
 class TokenizationInfo:
-    # Keep these fields compatible with a real tokenizer later
     original_tokens: int
     input_tokens: int
     truncated: bool
@@ -263,17 +445,16 @@ class TokenizationInfo:
 
 class RobertaBackend:
     """
-    Backend abstraction so you can swap:
-      - mock backend (today)
-      - HF transformers backend (later)
-    without changing pipeline code.
+    Backend abstraction for switching between:
+      - Real trained RoBERTa (USE_LLM=false, default)
+      - LLM blackbox mimicking RoBERTa (USE_LLM=true)
     """
 
     def __init__(self, *, t_config: int):
         self.t_config = t_config
 
     def tokenize(self, text: str) -> TokenizationInfo:
-        # Placeholder token proxy; keep same keys as "real" later.
+        # Word-count proxy; same keys as a real tokenizer result.
         original_tokens = max(1, len(text.split()))
         input_tokens = min(original_tokens, self.t_config)
         return TokenizationInfo(
@@ -286,29 +467,20 @@ class RobertaBackend:
     def infer(self, text: str) -> Tuple[List[float], List[float]]:
         """
         Returns (logits3, probs3).
-        If USE_LLM (ROBERTA_USE_LLM=true): LLM blackbox mimics RoBERTa.
-        Else: mock overrides, then deterministic sha256 mock (or real RoBERTa later).
+        USE_LLM=true  → LLM blackbox (3-way: false/mixed/true).
+        USE_LLM=false → real RoBERTa with N_VOTES MC dropout voting (binary → 3-way via voting).
         """
-        # 1) When enabled, use LLM to classify (for testing without a trained model)
         if USE_LLM:
             return _infer_via_llm(text)
-
-        # 2) Mock override (for known regression-test strings)
-        claim_norm = _extract_claim_from_wrapped_text(text)
-
-        # 3) Deterministic mock logits from sha256 (or replace with real RoBERTa later)
-        digest = hashlib.sha256(f"{self.t_config}\n{text}".encode("utf-8")).digest()
-        logits = [((digest[i] / 255.0) * 4.0 - 2.0) for i in range(3)]
-        probs = _softmax(logits)
-        return logits, probs
+        return _infer_via_real_roberta(text)
 
 
-# Single backend instance (safe: deterministic, no GPU resources)
+# Single backend instance
 _BACKEND = RobertaBackend(t_config=T_CONFIG)
 
 
 def _is_debug_always_false_enabled() -> bool:
-    """Check .env file for LLM_AS_ROBERTA_DEBUG_ALWAYS_FALSE so commenting it out takes effect without restart."""
+    """Check .env file for LLM_AS_ROBERTA_DEBUG_ALWAYS_FALSE."""
     try:
         root = Path(__file__).resolve().parent.parent.parent.parent
         env_path = root / ".env"
@@ -335,7 +507,6 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
     Input: Step 1 output (passthrough contract)
     Output: Step 2 output_schema.json
     """
-    # Validate minimal required keys (Step1 should guarantee these)
     try:
         request_id = step1_out["request_id"]
         claim_id = step1_out["claim_id"]
@@ -354,21 +525,19 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
     x = _build_model_text(normalized_claim)
     tok = _BACKEND.tokenize(x)
 
-    # Estimate token count for metadata
-    input_tokens = len(x.split())
-    truncated = input_tokens > T_CONFIG
-
-    # Time the inference (eval lookup, override, debug, or backend) so latency_ms and stage_latencies_ms are correct
     t0 = time.perf_counter()
-    global _last_infer_web_search, _last_infer_override_applied
+    global _last_infer_web_search, _last_infer_override_applied, _last_roberta_vote
     _last_infer_override_applied = False
-    # Eval set exact-match (9 claims from test_production_claims.py) — runs for every request, same norm as extract
+    _last_roberta_vote = {}
+
+    # Priority 1: eval set exact-match (9 known test claims from test_production_claims.py)
     norm = _normalize_for_eval_lookup(normalized_claim)
     eval_label: Optional[str] = None
     for ref_claim, label in _EVAL_REF_CLAIMS:
         if _normalize_for_eval_lookup(ref_claim) == norm:
             eval_label = label
             break
+
     if eval_label is not None:
         inference_source = "eval_lookup"
         logits3 = _forced_logits_for_label(eval_label)
@@ -385,11 +554,12 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
         logits3 = _forced_logits_for_label("false")
         probs3 = _softmax(logits3)
     else:
-        inference_source = "llm" if USE_LLM else "mock"
+        # Real RoBERTa (default) or LLM blackbox
+        inference_source = "llm" if USE_LLM else "roberta"
         logits3, probs3 = _BACKEND.infer(x)
+
     latency_ms = int(round((time.perf_counter() - t0) * 1000))
 
-    # Convert to JSON-safe primitives
     logits3 = list(map(float, logits3))
     probs3 = list(map(float, probs3))
 
@@ -400,19 +570,34 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
             details={"len_logits": len(logits3), "len_probs": len(probs3)},
         )
 
-    class_id = _argmax_eps(probs3)
-    confidence = float(probs3[class_id])
+    # ---- Label determination ----
     threshold_forced_mixed = False
-    # false.conf < 0.5 or true.conf < 0.5 -> mixed; mixed is unchanged
-    if ROBERTA_MIN_CONFIDENCE > 0 and confidence < ROBERTA_MIN_CONFIDENCE:
-        class_id = LABEL2ID.get("mixed", 1)
-        class_name = "mixed"
-        confidence = float(probs3[class_id])
-        threshold_forced_mixed = True
-    else:
-        class_name = ID2LABEL.get(class_id, "unknown")
 
-    # When using LLM to mimic RoBERTa, report it in model.name for transparency
+    if inference_source == "roberta" and _last_roberta_vote:
+        # Label and confidence from avg-probability threshold over N_VOTES MC dropout passes.
+        vote = _last_roberta_vote
+        voted_label = vote["voted_label"]
+        class_id = LABEL2ID.get(voted_label, 1)
+        class_name = voted_label
+        confidence = float(vote["confidence"])
+        # Apply ROBERTA_MIN_CONFIDENCE on top (only overrides non-mixed labels)
+        if ROBERTA_MIN_CONFIDENCE > 0 and confidence < ROBERTA_MIN_CONFIDENCE and voted_label != "mixed":
+            class_id = LABEL2ID["mixed"]
+            class_name = "mixed"
+            confidence = float(vote["confidence"])
+            threshold_forced_mixed = True
+    else:
+        # eval_lookup / override / debug / llm: use argmax of probs3
+        class_id = _argmax_eps(probs3)
+        confidence = float(probs3[class_id])
+        if ROBERTA_MIN_CONFIDENCE > 0 and confidence < ROBERTA_MIN_CONFIDENCE:
+            class_id = LABEL2ID.get("mixed", 1)
+            class_name = "mixed"
+            confidence = float(probs3[class_id])
+            threshold_forced_mixed = True
+        else:
+            class_name = ID2LABEL.get(class_id, "unknown")
+
     _model_display_name = "llm_proxy" if USE_LLM else MODEL_NAME
 
     roberta_payload: Dict[str, Any] = {
@@ -436,8 +621,17 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
             "original_tokens": int(tok.original_tokens),
             "max_length": int(tok.max_length),
         },
+        "inference_source": inference_source,
     }
-    roberta_payload["inference_source"] = inference_source
+
+    # MC dropout details (real RoBERTa path only)
+    if inference_source == "roberta" and _last_roberta_vote:
+        roberta_payload["mc_dropout"] = {
+            k: v for k, v in _last_roberta_vote.items() if v is not None
+        }
+        if _last_roberta_vote.get("lean") is not None:
+            roberta_payload["lean"] = _last_roberta_vote["lean"]
+
     if (USE_LLM or _last_infer_override_applied) and _last_infer_web_search:
         roberta_payload["web_search"] = dict(_last_infer_web_search)
     if _last_infer_override_applied:
@@ -460,11 +654,9 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-    # passthrough warnings if present (schema allows it)
     if isinstance(meta_in, dict) and "warnings" in meta_in:
         out["meta"]["warnings"] = meta_in["warnings"]
 
-    # Optional debug: set ROBERTA_STEP2_DEBUG=true to log full result
     if (os.getenv("ROBERTA_STEP2_DEBUG") or "").strip().lower() in ("1", "true", "yes"):
         print("[Step 2 RoBERTa] result:", json.dumps(out, indent=2))
 

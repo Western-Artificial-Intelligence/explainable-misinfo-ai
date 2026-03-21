@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/insoo/Documents/Western_WAI/explainable-misinfo-ai -name best.ckpt -o -name *.ckpt)",
+      "Bash(find /c/Users/insoo/Documents/Western_WAI/explainable-misinfo-ai -name *.py -path */roberta* -not -path */.venv/* -not -path */__pycache__/*)",
+      "Bash(find /c/Users/insoo/Documents/Western_WAI/explainable-misinfo-ai -name *.py -path *train* -not -path */.venv/* -not -path */__pycache__/*)",
+      "Bash(python3 -c \"import torch; ck = torch.load\\(''/c/Users/insoo/Documents/Western_WAI/explainable-misinfo-ai/api/production_pipeline/RoBERTa_model/best.ckpt'', map_location=''cpu''\\); print\\(list\\(ck.keys\\(\\)\\)\\); print\\(''epoch:'', ck.get\\(''epoch''\\)\\); print\\(''val_acc:'', ck.get\\(''val_acc''\\)\\); print\\(''config:'', ck.get\\(''config''\\)\\)\")",
+      "Bash(python -c \"import torch; ck = torch.load\\(''/c/Users/insoo/Documents/Western_WAI/explainable-misinfo-ai/api/production_pipeline/RoBERTa_model/best.ckpt'', map_location=''cpu''\\); print\\(list\\(ck.keys\\(\\)\\)\\); print\\(''epoch:'', ck.get\\(''epoch''\\)\\); print\\(''val_acc:'', ck.get\\(''val_acc''\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import torch; ck = torch.load\\('api/production_pipeline/RoBERTa_model/best.ckpt', map_location='cpu'\\); print\\(list\\(ck.keys\\(\\)\\)\\); print\\('epoch:', ck.get\\('epoch'\\)\\); print\\('val_acc:', ck.get\\('val_acc'\\)\\); print\\('config:', ck.get\\('config'\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import torch; ck = torch.load\\('api/production_pipeline/RoBERTa_model/best.ckpt', map_location='cpu', weights_only=False\\); print\\(list\\(ck.keys\\(\\)\\)\\); print\\('epoch:', ck.get\\('epoch'\\)\\); print\\('val_acc:', ck.get\\('val_acc'\\)\\); print\\('config:', ck.get\\('config'\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"\nimport sys\nsys.path.insert\\(0, '.'\\)\nfrom api.production_pipeline['2_RoBERTa_inference']['2_RoBERTa_inference'] import _load_real_roberta, _ROBERTA_CKPT_PATH\nprint\\('ckpt path:', _ROBERTA_CKPT_PATH\\)\nprint\\('exists:', _ROBERTA_CKPT_PATH.is_file\\(\\)\\)\nmodel, tok = _load_real_roberta\\(\\)\nprint\\('model loaded ok'\\)\nprint\\('tokenizer:', type\\(tok\\).__name__\\)\n\" 2>&1)",
+      "Bash(.venv/Scripts/python.exe -c \"\nimport sys\nsys.path.insert\\(0, '.'\\)\nimport importlib.util\nspec = importlib.util.spec_from_file_location\\('step2', 'api/production_pipeline/2_RoBERTa_inference/2_RoBERTa_inference.py'\\)\nmod = importlib.util.module_from_spec\\(spec\\)\nspec.loader.exec_module\\(mod\\)\nprint\\('ckpt path:', mod._ROBERTA_CKPT_PATH\\)\nprint\\('exists:', mod._ROBERTA_CKPT_PATH.is_file\\(\\)\\)\nmodel, tok = mod._load_real_roberta\\(\\)\nprint\\('model loaded ok, epoch from log above'\\)\nprint\\('tokenizer type:', type\\(tok\\).__name__\\)\n\" 2>&1)",
+      "Bash(.venv/Scripts/python.exe -c \"\nimport sys\nsys.path.insert\\(0, '.'\\)\nimport importlib.util\nspec = importlib.util.spec_from_file_location\\('api.production_pipeline.step2', 'api/production_pipeline/2_RoBERTa_inference/2_RoBERTa_inference.py'\\)\nmod = importlib.util.module_from_spec\\(spec\\)\nsys.modules['api.production_pipeline.step2'] = mod\nspec.loader.exec_module\\(mod\\)\nprint\\('ckpt path:', mod._ROBERTA_CKPT_PATH\\)\nprint\\('exists:', mod._ROBERTA_CKPT_PATH.is_file\\(\\)\\)\nmodel, tok = mod._load_real_roberta\\(\\)\nprint\\('tokenizer type:', type\\(tok\\).__name__\\)\n\" 2>&1)",
+      "Bash(grep -v \"^$\\\\|UserWarning\\\\|huggingface_hub\\\\|symlinks\\\\|HF_HUB\\\\|Developer Mode\\\\|docs.microsoft\\\\|warnings.warn\\\\|Xet Storage\\\\|hf_xet\\\\|pip install\\\\|Some weights\\\\|newly init\\\\|TRAIN\")",
+      "Bash(.venv/Scripts/python.exe -c \"\nimport torch\nstate = torch.load\\('api/production_pipeline/RoBERTa_model/best.ckpt', map_location='cpu', weights_only=False\\)\nkeys = list\\(state['model_state'].keys\\(\\)\\)\nlora_keys = [k for k in keys if 'lora' in k.lower\\(\\)]\nprint\\('Total keys:', len\\(keys\\)\\)\nprint\\('LoRA keys:', len\\(lora_keys\\)\\)\nprint\\('Sample LoRA keys:', lora_keys[:6]\\)\n\" 2>&1)",
+      "Bash(.venv/Scripts/python.exe api/production_pipeline/middlewares/test_LLM_as_RoBERTa.py)",
+      "Bash(.venv/Scripts/python.exe api/production_pipeline/RoBERTa_model/train_calibration.py)",
+      "Bash(python:*)"
+    ]
+  }
+}
