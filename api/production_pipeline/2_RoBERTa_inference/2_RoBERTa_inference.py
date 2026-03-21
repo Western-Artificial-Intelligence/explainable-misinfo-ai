@@ -29,8 +29,30 @@ MODEL_NAME = os.getenv("ROBERTA_MODEL_NAME", "roberta-base(+lora)")
 MODEL_REVISION = os.getenv("ROBERTA_MODEL_REVISION", "dev")
 
 # When True, use LLM blackbox to mimic RoBERTa (for testing without a trained model).
-# When False, use the real RoBERTa backend (currently mock; replace with trained model later).
+# When False, use the real RoBERTa backend (best_3way.ckpt if available, else best.ckpt binary).
 USE_LLM = (os.getenv("ROBERTA_USE_LLM", "false") or "false").strip().lower() in ("1", "true", "yes")
+
+# Runtime override — set via set_use_llm() so the API can switch backends without restart.
+_use_llm_override: Optional[bool] = None
+
+
+def set_use_llm(val: bool) -> None:
+    global _use_llm_override
+    _use_llm_override = bool(val)
+
+
+def is_use_llm() -> bool:
+    if _use_llm_override is not None:
+        return _use_llm_override
+    return USE_LLM
+
+# Paths to model checkpoints
+_MODEL_DIR = Path(__file__).resolve().parents[1] / "RoBERTa_model"
+_CKPT_3WAY = _MODEL_DIR / "best_3way.ckpt"
+_CKPT_BINARY = _MODEL_DIR / "best.ckpt"
+
+# For binary model: |logit_false - logit_true| < threshold → output "mixed"
+ROBERTA_DIFF_THRESHOLD = float(os.getenv("ROBERTA_DIFF_THRESHOLD", "0.5"))
 
 # Optional nudge: when false or true has conf < threshold, output "mixed" instead. Set ROBERTA_MIN_CONFIDENCE (e.g. 0.5) to enable; default 0 = off.
 def _get_min_confidence() -> float:
@@ -75,6 +97,20 @@ def _softmax(logits: List[float]) -> List[float]:
     if s == 0:
         return [1.0 / len(logits)] * len(logits)
     return [e / s for e in exps]
+
+
+def _binary_logits_to_3way(logit_false: float, logit_true: float, diff_threshold: float) -> List[float]:
+    """
+    Map binary [logit_false, logit_true] to 3-way [logit_false, logit_mixed, logit_true].
+    When |logit_false - logit_true| < threshold, boost logit_mixed so it wins.
+    """
+    diff = abs(logit_false - logit_true)
+    if diff < diff_threshold:
+        logit_mixed = (logit_false + logit_true) / 2.0 + 1.0  # boost above both
+        return [logit_false, logit_mixed, logit_true]
+    else:
+        logit_mixed = min(logit_false, logit_true) - 1.0  # suppress mixed
+        return [logit_false, logit_mixed, logit_true]
 
 
 def _argmax_eps(vals: List[float]) -> int:
@@ -222,6 +258,150 @@ def _apply_claim_override(claim: str) -> Optional[str]:
     return None
 
 
+# ----------------------------
+# Real RoBERTa backend
+# ----------------------------
+
+_real_roberta_model = None
+_real_roberta_tokenizer = None
+_real_roberta_device: Optional[str] = None
+_real_roberta_is_3way: bool = False
+
+
+def _load_real_roberta():
+    """Lazy-load real RoBERTa checkpoint. Prefers best_3way.ckpt, falls back to best.ckpt."""
+    global _real_roberta_model, _real_roberta_tokenizer, _real_roberta_device, _real_roberta_is_3way
+    if _real_roberta_model is not None:
+        return _real_roberta_model, _real_roberta_tokenizer, _real_roberta_device, _real_roberta_is_3way
+
+    import torch
+    from transformers import AutoTokenizer
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # --- 3-way model (best_3way.ckpt) ---
+    if _CKPT_3WAY.is_file():
+        from transformers import AutoModelForSequenceClassification
+        ckpt = torch.load(str(_CKPT_3WAY), map_location=device, weights_only=False)
+        backbone = ckpt.get("config", {}).get("backbone", "roberta-base")
+        model = AutoModelForSequenceClassification.from_pretrained(backbone, num_labels=3, ignore_mismatched_sizes=True)
+        try:
+            from peft import PeftModel, get_peft_model, LoraConfig, TaskType
+            lora_cfg = LoraConfig(task_type=TaskType.SEQ_CLS, r=8, lora_alpha=16, lora_dropout=0.05,
+                                  target_modules=["query", "value"])
+            model = get_peft_model(model, lora_cfg)
+        except ImportError:
+            pass
+        model.load_state_dict(ckpt["model_state"], strict=False)
+        tokenizer = AutoTokenizer.from_pretrained(backbone)
+        model.eval()
+        model.to(device)
+        _real_roberta_model = model
+        _real_roberta_tokenizer = tokenizer
+        _real_roberta_device = device
+        _real_roberta_is_3way = True
+        logger.info("[RoBERTa] Loaded 3-way model from best_3way.ckpt")
+        return model, tokenizer, device, True
+
+    # --- Binary model (best.ckpt) ---
+    if _CKPT_BINARY.is_file():
+        try:
+            from baseline_model.models.domain_adversarial import DomainAdversarialClassifier
+        except ImportError:
+            _da_path = Path(__file__).resolve().parents[3] / "baseline_model" / "models" / "domain_adversarial.py"
+            spec = importlib.util.spec_from_file_location("domain_adversarial", str(_da_path))
+            _mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_mod)
+            DomainAdversarialClassifier = _mod.DomainAdversarialClassifier
+
+        import torch
+        ckpt = torch.load(str(_CKPT_BINARY), map_location=device, weights_only=False)
+        cfg = ckpt.get("config", {})
+        backbone = cfg.get("model", {}).get("backbone", "roberta-base")
+        lambda_adv = float(cfg.get("model", {}).get("lambda_adv", 0.5))
+        # Infer num_sources from saved domain head weights
+        state = ckpt["model_state"]
+        num_sources = state.get("domain_head.3.weight", state.get("domain_head.2.weight", None))
+        num_sources = num_sources.shape[0] if num_sources is not None else 3
+
+        model = DomainAdversarialClassifier(backbone_name=backbone, num_sources=num_sources, lambda_adv=lambda_adv)
+
+        # Add special tokens (same 4 as training) and resize embeddings before loading
+        tokenizer = AutoTokenizer.from_pretrained(backbone, use_fast=True)
+        _SPECIAL_TOKENS = ["<CLAIM>", "</CLAIM>", "<ARTICLE>", "</ARTICLE>"]
+        tokenizer.add_special_tokens({"additional_special_tokens": _SPECIAL_TOKENS})
+
+        # If the checkpoint has LoRA keys (encoder.base_model.model...), apply LoRA first
+        has_lora = any("base_model" in k for k in state)
+        if has_lora:
+            lora_cfg_saved = cfg.get("lora", {})
+            try:
+                from peft import LoraConfig, get_peft_model, TaskType
+                lora_config = LoraConfig(
+                    task_type=TaskType.FEATURE_EXTRACTION,
+                    inference_mode=False,
+                    r=lora_cfg_saved.get("r", 8),
+                    lora_alpha=lora_cfg_saved.get("alpha", 16),
+                    lora_dropout=lora_cfg_saved.get("dropout", 0.05),
+                    target_modules=lora_cfg_saved.get("target_modules", ["query", "value"]),
+                )
+                model.encoder = get_peft_model(model.encoder, lora_config)
+            except ImportError:
+                logger.warning("[RoBERTa] peft not installed — LoRA keys in checkpoint will cause mismatch")
+
+        # Resize embeddings to match tokenizer (50265 + 4 special tokens = 50269)
+        try:
+            model.encoder.resize_token_embeddings(len(tokenizer))
+        except Exception:
+            pass
+
+        model.load_state_dict(state)
+        model.eval()
+        model.to(device)
+        _real_roberta_model = model
+        _real_roberta_tokenizer = tokenizer
+        _real_roberta_device = device
+        _real_roberta_is_3way = False
+        logger.info("[RoBERTa] Loaded binary model from best.ckpt")
+        return model, tokenizer, device, False
+
+    raise RobertaInferenceError(
+        "MODEL_NOT_FOUND",
+        "No RoBERTa checkpoint found. Place best_3way.ckpt or best.ckpt in RoBERTa_model/, or set ROBERTA_USE_LLM=true.",
+        {"searched": [str(_CKPT_3WAY), str(_CKPT_BINARY)]},
+    )
+
+
+def _infer_via_real_roberta(text: str) -> Tuple[List[float], List[float]]:
+    """Run real RoBERTa checkpoint; returns (logits3, probs3)."""
+    import torch
+
+    model, tokenizer, device, is_3way = _load_real_roberta()
+    claim = _extract_claim_from_wrapped_text(text) or text.strip()
+
+    enc = tokenizer(
+        claim,
+        max_length=T_CONFIG,
+        truncation=True,
+        padding="max_length",
+        return_tensors="pt",
+    )
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+
+    with torch.no_grad():
+        if is_3way:
+            out = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits3 = out.logits[0].tolist()  # [false, mixed, true]
+        else:
+            out = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits2 = out["logits_label"][0].tolist()  # [logit_false, logit_true]
+            logits3 = _binary_logits_to_3way(logits2[0], logits2[1], ROBERTA_DIFF_THRESHOLD)
+
+    probs3 = _softmax(logits3)
+    return logits3, probs3
+
+
 # Set by _infer_via_llm so run_2 can report whether web search was used (for debugging/visibility).
 _last_infer_web_search: Dict[str, Any] = {}
 _last_infer_override_applied: bool = False
@@ -287,20 +467,11 @@ class RobertaBackend:
         """
         Returns (logits3, probs3).
         If USE_LLM (ROBERTA_USE_LLM=true): LLM blackbox mimics RoBERTa.
-        Else: mock overrides, then deterministic sha256 mock (or real RoBERTa later).
+        Else: real RoBERTa (best_3way.ckpt or best.ckpt with diff-threshold).
         """
-        # 1) When enabled, use LLM to classify (for testing without a trained model)
-        if USE_LLM:
+        if is_use_llm():
             return _infer_via_llm(text)
-
-        # 2) Mock override (for known regression-test strings)
-        claim_norm = _extract_claim_from_wrapped_text(text)
-
-        # 3) Deterministic mock logits from sha256 (or replace with real RoBERTa later)
-        digest = hashlib.sha256(f"{self.t_config}\n{text}".encode("utf-8")).digest()
-        logits = [((digest[i] / 255.0) * 4.0 - 2.0) for i in range(3)]
-        probs = _softmax(logits)
-        return logits, probs
+        return _infer_via_real_roberta(text)
 
 
 # Single backend instance (safe: deterministic, no GPU resources)
@@ -385,7 +556,7 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
         logits3 = _forced_logits_for_label("false")
         probs3 = _softmax(logits3)
     else:
-        inference_source = "llm" if USE_LLM else "mock"
+        inference_source = "llm" if is_use_llm() else "roberta"
         logits3, probs3 = _BACKEND.infer(x)
     latency_ms = int(round((time.perf_counter() - t0) * 1000))
 
@@ -413,7 +584,7 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
         class_name = ID2LABEL.get(class_id, "unknown")
 
     # When using LLM to mimic RoBERTa, report it in model.name for transparency
-    _model_display_name = "llm_proxy" if USE_LLM else MODEL_NAME
+    _model_display_name = "llm_proxy" if is_use_llm() else MODEL_NAME
 
     roberta_payload: Dict[str, Any] = {
         "label": {
@@ -438,7 +609,7 @@ def run_2_roberta_inference(step1_out: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
     roberta_payload["inference_source"] = inference_source
-    if (USE_LLM or _last_infer_override_applied) and _last_infer_web_search:
+    if (is_use_llm() or _last_infer_override_applied) and _last_infer_web_search:
         roberta_payload["web_search"] = dict(_last_infer_web_search)
     if _last_infer_override_applied:
         roberta_payload["claim_override_applied"] = True

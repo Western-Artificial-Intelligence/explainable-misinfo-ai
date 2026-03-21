@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Textarea } from "./ui/textarea";
 import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
 import type { ModelId, HistoryEntry } from "../hooks/useHistory";
 
 export type Prediction = "TRUE" | "FALSE" | "MIXED";
@@ -439,7 +440,29 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
   const [activeExample, setActiveExample] = useState<number | null>(null);
   const [extractedSource, setExtractedSource] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<ModelId>("roberta");
+  const [useLLM, setUseLLM] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync backend mode on mount
+  useEffect(() => {
+    fetch(apiUrl("/api/roberta-mode"))
+      .then((r) => r.json())
+      .then((data) => setUseLLM(!!data.use_llm))
+      .catch(() => {});
+  }, []);
+
+  const handleToggleBackend = async (checked: boolean) => {
+    setUseLLM(checked);
+    try {
+      await fetch(apiUrl("/api/roberta-mode"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ use_llm: checked }),
+      });
+    } catch {
+      // best effort
+    }
+  };
 
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
 
@@ -663,6 +686,21 @@ export function AnalyzerSection({ onResult, restoredEntry }: AnalyzerSectionProp
           </span>
 
           <div className="flex-1 sm:flex-none" />
+
+          {/* Backend toggle */}
+          <div className="flex items-center gap-1.5">
+            <span className={`text-xs font-semibold transition-colors ${!useLLM ? "text-blue-600 dark:text-blue-400" : "text-gray-400 dark:text-gray-600"}`}>
+              RoBERTa
+            </span>
+            <Switch
+              checked={useLLM}
+              onCheckedChange={handleToggleBackend}
+              className="data-[state=checked]:bg-purple-500 data-[state=unchecked]:bg-blue-500"
+            />
+            <span className={`text-xs font-semibold transition-colors ${useLLM ? "text-purple-600 dark:text-purple-400" : "text-gray-400 dark:text-gray-600"}`}>
+              LLM
+            </span>
+          </div>
 
           <Button onClick={handleAnalyze} disabled={!canAnalyze}
             className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md hover:shadow-blue-500/30 disabled:opacity-70 transition-all duration-300 rounded-xl px-5"

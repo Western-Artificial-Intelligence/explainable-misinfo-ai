@@ -434,6 +434,29 @@ async def process_stream(request: Request):
     )
 
 
+class RobertaModeRequest(BaseModel):
+    use_llm: bool
+
+
+@router.get("/roberta-mode")
+async def get_roberta_mode():
+    """Return the current RoBERTa backend mode."""
+    _ensure_steps_loaded()
+    step2 = sys.modules.get("step2_roberta_inference")
+    use_llm = step2.is_use_llm() if step2 and hasattr(step2, "is_use_llm") else True
+    return {"use_llm": use_llm}
+
+
+@router.post("/roberta-mode")
+async def set_roberta_mode(body: RobertaModeRequest):
+    """Switch between LLM_as_RoBERTa (use_llm=true) and real RoBERTa (use_llm=false)."""
+    _ensure_steps_loaded()
+    step2 = sys.modules.get("step2_roberta_inference")
+    if step2 and hasattr(step2, "set_use_llm"):
+        step2.set_use_llm(body.use_llm)
+    return {"use_llm": body.use_llm}
+
+
 class LLMTestRequest(BaseModel):
     user_context: str
 
