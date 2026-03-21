@@ -1,7 +1,7 @@
 model:
   backbone: distilroberta-base
   max_length: 256
-  lambda_adv: 0.3
+  lambda_adv: 0.1
 
 lora:
   enabled: false
