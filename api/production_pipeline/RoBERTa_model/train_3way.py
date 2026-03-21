@@ -131,7 +131,7 @@ class ClaimDataset(Dataset):
 # ── Model ─────────────────────────────────────────────────────────────────────
 
 def build_model(tokenizer):
-    from baseline_model.models.lora_utils import try_apply_peft_lora
+    from peft import get_peft_model, LoraConfig, TaskType
 
     model = AutoModelForSequenceClassification.from_pretrained(
         BACKBONE,
@@ -139,22 +139,17 @@ def build_model(tokenizer):
         id2label=ID2LABEL,
         label2id=LABEL2ID,
     )
-    # Add special tokens <CLAIM> </CLAIM>
     model.resize_token_embeddings(len(tokenizer))
 
-    model, peft_applied = try_apply_peft_lora(
-        model,
+    lora_config = LoraConfig(
+        task_type=TaskType.SEQ_CLS,
         r=LORA_R,
         lora_alpha=LORA_ALPHA,
         lora_dropout=LORA_DROPOUT,
         target_modules=LORA_TARGETS,
     )
-    if not peft_applied:
-        print("[train] LoRA not applied — training full model")
-
-    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    n_total     = sum(p.numel() for p in model.parameters())
-    print(f"[train] Trainable: {n_trainable:,} / {n_total:,} params")
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
     return model
 
 
@@ -216,8 +211,11 @@ def train():
     print(f"[train] Class weights → false={weights[0]:.3f}  mixed={weights[1]:.3f}  true={weights[2]:.3f}")
 
     # ── Tokenizer ─────────────────────────────────────────────────────────────
-    from baseline_model.data_utils.tokenize import build_tokenizer
-    tokenizer = build_tokenizer(BACKBONE)
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(BACKBONE)
+    special_tokens = ["<CLAIM>", "</CLAIM>"]
+    tokenizer.add_tokens(special_tokens)
+    print(f"[train] Added {len(special_tokens)} special tokens to tokenizer")
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = build_model(tokenizer)
