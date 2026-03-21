@@ -109,13 +109,11 @@ def main():
     )
     print(f"\n[data] Combined   : {len(combined):>6}  | {dict(combined['label_3way'].value_counts())}")
 
-    balanced = (
-        combined.groupby("label_3way", group_keys=False)
-        .apply(lambda g: g.sample(min(len(g), MAX_PER_CLASS), random_state=SEED))
-        .reset_index(drop=True)
-        .sample(frac=1, random_state=SEED)
-        .reset_index(drop=True)
-    )
+    parts = []
+    for label in ["false", "mixed", "true"]:
+        group = combined[combined["label_3way"] == label]
+        parts.append(group.sample(min(len(group), MAX_PER_CLASS), random_state=SEED))
+    balanced = pd.concat(parts).sample(frac=1, random_state=SEED).reset_index(drop=True)
     print(f"[data] Balanced   : {len(balanced):>6}  | {dict(balanced['label_3way'].value_counts())}")
 
     balanced.to_parquet(OUT_PATH, index=False)
