@@ -128,7 +128,7 @@ class DomainAdversarialClassifier(nn.Module):
         if label is not None:
             mask = (label != -100)
             if mask.any():
-                weight = torch.tensor([1.5, 1.0], device=device)
+                weight = torch.tensor([1.0, 1.5], device=device)
                 loss_label = F.cross_entropy(logits_label[mask], label[mask], weight=weight)
 
         # Domain adversarial loss
